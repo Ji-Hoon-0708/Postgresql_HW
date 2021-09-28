@@ -1198,6 +1198,7 @@ tree_table_query_creator(){
 		
 		char *now_data_addr = toast_item_rawdata + SizeofHeapTupleHeader + 17;
 		uint16_t tree_depth = *((uint16_t *)(now_data_addr));
+		int num_datas = 7;
 		if (!carefully_incl_addr(toast_now_item_id, toast_item_rawdata, now_data_addr, 2)){
 			// item change
 			if ((toast_now_item_offset + 1) <= tree_data_item_num){
@@ -1396,130 +1397,97 @@ tree_table_query_creator(){
 		//printf("drop_query: %s\n", drop_query);
 
 		// make query for create table
-		char *create_query = (char *) malloc(sizeof(char) * (55 + num_nodes * 15));
-		char *create_query_front = "CREATE TABLE higgs_1k_for_hw(";
+		char *create_query = (char *) malloc(sizeof(char) * (50 + num_datas * (num_nodes * 15)));
+		char *create_query_front = "CREATE TABLE higgs_1k_for_hw(d0 int, d1 int, ";
 		char *create_query_end = ");";
+		char *col_data_front = "d";
+		char *col_dash = "_";
+		char *create_comma = ", ";
+		char *col_type_int = " int";
+		char *col_type_float = " real";
 
 		strcpy(create_query, create_query_front);
 
 		char *create_query_tmp = (char *) malloc(sizeof(char) * 15);
-		char *create_num_tmp = (char *) malloc(sizeof(char) * 5);
-		char *col_name_front = "col";
-		char *col_name = ", col";
-		char *col_type = " real";
-		for (int col_num = 0 ; col_num < num_nodes ; col_num++){
-			if (col_num == 0){
-				strcpy(create_query_tmp, col_name_front);
-			} else{
-				strcpy(create_query_tmp, col_name);
+		char *create_col_tmp = (char *) malloc(sizeof(char) * 10);
+		char *create_data_num_tmp = (char *) malloc(sizeof(char) * 5);
+		char *create_col_num_tmp = (char *) malloc(sizeof(char) * 5);
+
+		for (int data_num = 2 ; data_num < num_datas ; data_num++){
+			strcpy(create_col_tmp, col_data_front);
+			sprintf(create_data_num_tmp, "%d", data_num);
+			strcat(create_col_tmp, create_data_num_tmp);
+			strcat(create_col_tmp, col_dash);
+			for (int col_num = 0 ; col_num < num_nodes ; col_num++){
+				strcpy(create_query_tmp, create_col_tmp);
+				sprintf(create_col_num_tmp, "%d", col_num);
+				strcat(create_query_tmp, create_col_num_tmp);
+				if (data_num == 2){
+					strcat(create_query_tmp, col_type_int);
+				} else{
+					strcat(create_query_tmp, col_type_float);
+				}
+				if ((col_num < (num_nodes - 1)) | (data_num < (num_datas - 1))){
+					strcat(create_query_tmp, create_comma);
+				}
+				strcat(create_query, create_query_tmp);	
 			}
-			sprintf(create_num_tmp, "%d", col_num);
-			strcat(create_query_tmp, create_num_tmp);
-			strcat(create_query_tmp, col_type);
-			strcat(create_query, create_query_tmp);	
 		}
 		free(create_query_tmp);
-		free(create_num_tmp);
+		free(create_col_tmp);
+		free(create_data_num_tmp);
+		free(create_col_num_tmp);
 
 		strcat(create_query, create_query_end);
 		//printf("create_query: %s\n", create_query);
 
 		// make query for save data to table
-		char *save_query = (char *) malloc(sizeof(char) * (40 + 7 * (5 + 10 * num_nodes)));
-		char *save_query_front = "INSERT INTO higgs_1k_for_hw VALUES";
-		char *save_query_end = ";";
-
+		char *save_query = malloc(sizeof(char) * (40 + 7 * (num_nodes * 15)));
+		char *save_num_tmp = (char *) malloc(sizeof(char) * 10);
+		char *save_query_front = "INSERT INTO higgs_1k_for_hw VALUES(";
+		char *save_query_end = ");";
+		char *save_comma = ", ";
 		strcpy(save_query, save_query_front);
 
-		char *save_query_tmp = (char *) malloc(sizeof(char) * (5 + 10 * num_nodes));
-		char *save_num_tmp = (char *) malloc(sizeof(char) * 5);
-		char *save_query_tmp_front = "(";
-		char *save_query_tmp_end = ")";
-		char *comma = ",";
-		
-		strcpy(save_query_tmp, save_query_tmp_front);
-		for (int col_num = 0 ; col_num < num_nodes ; col_num++){
-			if (col_num == 0){
+		for (int data_num = 0 ; data_num < num_datas ; data_num++){  
+			if (data_num == 0){
 				sprintf(save_num_tmp, "%d", tree_depth);
-			} else{
-				sprintf(save_num_tmp, "%d", 0);
-			}
-			strcat(save_query_tmp, save_num_tmp);
-			if (col_num < (num_nodes - 1)){
-				strcat(save_query_tmp, comma);
-			} 
-		}
-		strcat(save_query_tmp, save_query_tmp_end);
-		
-		strcat(save_query, save_query_tmp);
-		strcat(save_query, comma);
-
-		strcpy(save_query_tmp, save_query_tmp_front);
-		for (int col_num = 0 ; col_num < num_nodes ; col_num++){
-			if (col_num == 0){
+				strcat(save_query, save_num_tmp);
+				strcat(save_query, save_comma);
+			} else if (data_num == 1){
 				sprintf(save_num_tmp, "%d", n_y_labels);
+				strcat(save_query, save_num_tmp);
+				strcat(save_query, save_comma);
 			} else{
-				sprintf(save_num_tmp, "%d", 0);
-			}
-			strcat(save_query_tmp, save_num_tmp);
-			if (col_num < (num_nodes - 1)){
-				strcat(save_query_tmp, comma);
-			} 
-		}
-		strcat(save_query_tmp, save_query_tmp_end);
-		
-		strcat(save_query, save_query_tmp);
-		strcat(save_query, comma);
-
-		strcpy(save_query_tmp, save_query_tmp_front);
-		for (int col_num = 0 ; col_num < num_nodes ; col_num++){
-			sprintf(save_num_tmp, "%d", feature_indices[col_num]);
-			strcat(save_query_tmp, save_num_tmp);
-			if (col_num < (num_nodes - 1)){
-				strcat(save_query_tmp, comma);
-			} 
-		}
-		strcat(save_query_tmp, save_query_tmp_end);
-
-		strcat(save_query, save_query_tmp);
-		strcat(save_query, comma);
-
-		strcpy(save_query_tmp, save_query_tmp_front);
-		for (int col_num = 0 ; col_num < num_nodes ; col_num++){
-			sprintf(save_num_tmp, "%f", feature_thresholds[col_num]);
-			strcat(save_query_tmp, save_num_tmp);
-			if (col_num < (num_nodes - 1)){
-				strcat(save_query_tmp, comma);
-			} 
-		}
-		strcat(save_query_tmp, save_query_tmp_end);
-
-		strcat(save_query, save_query_tmp);
-		strcat(save_query, comma);
-
-		for (int predictions_line = 0 ; predictions_line < 3 ; predictions_line++){
-			strcpy(save_query_tmp, save_query_tmp_front);
-			for (int col_num = 0 ; col_num < num_nodes ; col_num++){
-				sprintf(save_num_tmp, "%f", predictions[predictions_line][col_num]);
-				strcat(save_query_tmp, save_num_tmp);
-				if (col_num < (num_nodes - 1)){
-					strcat(save_query_tmp, comma);
-				} 
-			}
-			strcat(save_query_tmp, save_query_tmp_end);
-
-			if (predictions_line < 2){
-				strcat(save_query, save_query_tmp);
-				strcat(save_query, comma);
-			} else{
-				strcat(save_query, save_query_tmp);
+				for (int col_num = 0 ; col_num < num_nodes ; col_num++){
+					switch (data_num){
+						case 2:
+							sprintf(save_num_tmp, "%d", feature_indices[col_num]);
+							break;
+						case 3:
+							sprintf(save_num_tmp, "%f", feature_thresholds[col_num]);
+							break;
+						case 4:
+							sprintf(save_num_tmp, "%f", predictions[0][col_num]);
+							break;
+						case 5:
+							sprintf(save_num_tmp, "%f", predictions[1][col_num]);
+							break;
+						case 6:
+							sprintf(save_num_tmp, "%f", predictions[2][col_num]);
+							break;                    
+					}
+					strcat(save_query, save_num_tmp);
+					if ((col_num < (num_nodes - 1)) | (data_num < (num_datas - 1))){
+						strcat(save_query, save_comma);
+					} 
+				}
 			}
 		}
-		free(save_query_tmp);
-		free(save_num_tmp);	
+		free(save_num_tmp);
 
 		strcat(save_query, save_query_end);	
-		//printf("save_query: %s\n", save_query);
+		//printf("%s\n", save_query);
 
 		char* total_query = (char *) malloc(sizeof(char) * (strlen(drop_query) + strlen(create_query) + strlen(save_query) + 5));
 		strcpy(total_query, drop_query);
