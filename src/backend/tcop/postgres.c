@@ -791,6 +791,22 @@ float_debug_print(float* variable, int var_len, int typeflag){ // 0 for float / 
 	printf("\n");
 }
 
+static char *
+addr_auto_padder(ItemId item_id, char* now_data_addr, char *item_base_addr, int num_nodes, int data_size){
+	int now_filled = (now_data_addr - item_base_addr);
+	int will_filled = num_nodes * data_size;
+	//printf("%d %d %d\n", now_filled, will_filled, item_id->lp_len);
+	if (now_filled + will_filled >= item_id->lp_len){
+		// item change will occur
+		int remain = item_id->lp_len - now_filled;
+		int padding = remain % data_size;
+		//printf("padding %d\n", padding);
+		return now_data_addr + padding;
+	} else{
+		return now_data_addr;
+	}
+}
+
 static bool 
 carefully_incl_addr(ItemId item_id, char* item_base_addr, char *now_data_addr, int incl_num){
 	if (now_data_addr + incl_num >= item_base_addr + item_id->lp_len){
@@ -1038,8 +1054,6 @@ tree_data_extractor(Oid tree_table_oid){
 		printf("feature_thresholds\n");
 		float_debug_print(feature_thresholds, num_nodes, 0);
 
-		now_data_addr += 4; // padding
-
 		int* is_categorical = (int *) malloc(sizeof(int) * num_nodes);
 		for (int is_categorical_i = 0 ; is_categorical_i < num_nodes ; is_categorical_i++){
 			is_categorical[is_categorical_i] = *((int *)(now_data_addr));
@@ -1060,6 +1074,8 @@ tree_data_extractor(Oid tree_table_oid){
 		}
 		printf("is_categorical\n");
 		int_debug_print(is_categorical, num_nodes, 0);
+
+		now_data_addr += 4; // padding
 
 		float* nonnull_split_count = (float *) malloc(sizeof(float) * (num_nodes * 2));
 		for (int nonnull_split_count_i = 0 ; nonnull_split_count_i < (num_nodes * 2) ; nonnull_split_count_i++){
@@ -1149,8 +1165,6 @@ tree_table_query_creator(){
 		RawStmt *parsetree_tree = lfirst_node(RawStmt, parsetree_item_tree);
 		querytree_list_tree = pg_analyze_and_rewrite(parsetree_tree, train_select_query, NULL, 0, NULL);
 	}
-
-	
 	
 	//TRACE_POSTGRESQL_QUERY_DONE(train_select_query);
 	ListCell* query_list_tree;
@@ -1197,6 +1211,7 @@ tree_table_query_creator(){
 		HeapTupleHeader toast_item_header = (HeapTupleHeader) toast_item_rawdata;
 		
 		char *now_data_addr = toast_item_rawdata + SizeofHeapTupleHeader + 17;
+		//printf("addr offset: %x\n", (char *)now_data_addr - (char *)tree_data_page);
 		uint16_t tree_depth = *((uint16_t *)(now_data_addr));
 		int num_datas = 7;
 		if (!carefully_incl_addr(toast_now_item_id, toast_item_rawdata, now_data_addr, 2)){
@@ -1213,7 +1228,7 @@ tree_table_query_creator(){
 		} else{
 			now_data_addr += 2;
 		}
-
+		//printf("addr offset: %x\n", (char *)now_data_addr - (char *)tree_data_page);
 		uint16_t n_y_labels = *((uint16_t *)(now_data_addr));
 		if (!carefully_incl_addr(toast_now_item_id, toast_item_rawdata, now_data_addr, 2)){
 			// item change
@@ -1229,7 +1244,7 @@ tree_table_query_creator(){
 		} else{
 			now_data_addr += 2;
 		}
- 		
+ 		//printf("addr offset: %x\n", (char *)now_data_addr - (char *)tree_data_page);
 		if (!carefully_incl_addr(toast_now_item_id, toast_item_rawdata, now_data_addr, 2)){
 			// item change
 			if ((toast_now_item_offset + 1) <= tree_data_item_num){
@@ -1244,7 +1259,7 @@ tree_table_query_creator(){
 		} else{
 			now_data_addr += 2;
 		}
-    	
+    	//printf("addr offset: %x\n", (char *)now_data_addr - (char *)tree_data_page);
 		if (!carefully_incl_addr(toast_now_item_id, toast_item_rawdata, now_data_addr, 2)){
 			// item change
 			if ((toast_now_item_offset + 1) <= tree_data_item_num){
@@ -1259,7 +1274,7 @@ tree_table_query_creator(){
 		} else{
 			now_data_addr += 2;
 		}
-    	
+    	//printf("addr offset: %x\n", (char *)now_data_addr - (char *)tree_data_page);
 		if (!carefully_incl_addr(toast_now_item_id, toast_item_rawdata, now_data_addr, 4)){
 			// item change
 			if ((toast_now_item_offset + 1) <= tree_data_item_num){
@@ -1278,7 +1293,9 @@ tree_table_query_creator(){
 		int num_nodes = pow(2,tree_depth) - 1;
 		printf("tree_data_extractor - toast page data debug\ntree_depth: %d\nn_y_labels: %d\nnum_nodes: %d\n", 
 										tree_depth, n_y_labels, num_nodes);
-		
+
+		now_data_addr = addr_auto_padder(toast_now_item_id, now_data_addr, toast_item_rawdata, num_nodes, 4);
+		//printf("addr offset: %x\n", (char *)now_data_addr - (char *)tree_data_page);
 		int* feature_indices = (int *) malloc(sizeof(int) * num_nodes);
 		for (int feature_indices_i = 0 ; feature_indices_i < num_nodes ; feature_indices_i++){
 			feature_indices[feature_indices_i] = *((int *)(now_data_addr));
@@ -1290,6 +1307,7 @@ tree_table_query_creator(){
 					toast_item_rawdata = ((char *) PageGetItem(tree_data_page, toast_now_item_id));
 					toast_item_header = (HeapTupleHeader) toast_item_rawdata;
 					now_data_addr = toast_item_rawdata + SizeofHeapTupleHeader + 13;
+					now_data_addr = addr_auto_padder(toast_now_item_id, now_data_addr, toast_item_rawdata, num_nodes - feature_indices_i - 1, 4);
 				} else{
 					printf("tree_data_extractor - item number error in toast page, want %d but max %d\n", toast_now_item_offset + 1, tree_data_item_num);
 				}
@@ -1299,7 +1317,9 @@ tree_table_query_creator(){
 		}
 		printf("feature_indices\n");
 		int_debug_print(feature_indices, num_nodes, 0);
-		
+
+		now_data_addr = addr_auto_padder(toast_now_item_id, now_data_addr, toast_item_rawdata, num_nodes, 8);
+		//printf("addr offset: %x\n", (char *)now_data_addr - (char *)tree_data_page);
 		float* feature_thresholds = (float *) malloc(sizeof(float) * num_nodes);
 		for (int feature_thresholds_i = 0 ; feature_thresholds_i < num_nodes ; feature_thresholds_i++){
 			feature_thresholds[feature_thresholds_i] = (float) *((double *)(now_data_addr));
@@ -1311,6 +1331,7 @@ tree_table_query_creator(){
 					toast_item_rawdata = ((char *) PageGetItem(tree_data_page, toast_now_item_id));
 					toast_item_header = (HeapTupleHeader) toast_item_rawdata;
 					now_data_addr = toast_item_rawdata + SizeofHeapTupleHeader + 13;
+					now_data_addr = addr_auto_padder(toast_now_item_id, now_data_addr, toast_item_rawdata, num_nodes - feature_thresholds_i - 1, 8);
 				} else{
 					printf("tree_data_extractor - item number error in toast page, want %d but max %d\n", toast_now_item_offset + 1, tree_data_item_num);
 				}
@@ -1321,8 +1342,8 @@ tree_table_query_creator(){
 		printf("feature_thresholds\n");
 		float_debug_print(feature_thresholds, num_nodes, 0);
 
-		now_data_addr += 4; // padding
-
+		now_data_addr = addr_auto_padder(toast_now_item_id, now_data_addr, toast_item_rawdata, num_nodes, 4);
+		//printf("addr offset: %x\n", (char *)now_data_addr - (char *)tree_data_page);
 		for (int is_categorical_i = 0 ; is_categorical_i < num_nodes ; is_categorical_i++){
 			if (!carefully_incl_addr(toast_now_item_id, toast_item_rawdata, now_data_addr, 4)){
 				// item change
@@ -1332,6 +1353,7 @@ tree_table_query_creator(){
 					toast_item_rawdata = ((char *) PageGetItem(tree_data_page, toast_now_item_id));
 					toast_item_header = (HeapTupleHeader) toast_item_rawdata;
 					now_data_addr = toast_item_rawdata + SizeofHeapTupleHeader + 13;
+					now_data_addr = addr_auto_padder(toast_now_item_id, now_data_addr, toast_item_rawdata, num_nodes - is_categorical_i - 1, 4);
 				} else{
 					printf("tree_data_extractor - item number error in toast page, want %d but max %d\n", toast_now_item_offset + 1, tree_data_item_num);
 				}
@@ -1339,7 +1361,10 @@ tree_table_query_creator(){
 				now_data_addr += 4;
 			}
 		}
+		printf("is_categorical\n");
 
+		now_data_addr = addr_auto_padder(toast_now_item_id, now_data_addr, toast_item_rawdata, num_nodes * 2, 8);
+		//printf("addr offset: %x\n", (char *)now_data_addr - (char *)tree_data_page);
 		for (int nonnull_split_count_i = 0 ; nonnull_split_count_i < (num_nodes * 2) ; nonnull_split_count_i++){
 			if (!carefully_incl_addr(toast_now_item_id, toast_item_rawdata, now_data_addr, 8)){
 				// item change
@@ -1349,6 +1374,7 @@ tree_table_query_creator(){
 					toast_item_rawdata = ((char *) PageGetItem(tree_data_page, toast_now_item_id));
 					toast_item_header = (HeapTupleHeader) toast_item_rawdata;
 					now_data_addr = toast_item_rawdata + SizeofHeapTupleHeader + 13;
+					now_data_addr = addr_auto_padder(toast_now_item_id, now_data_addr, toast_item_rawdata, (num_nodes * 2) - nonnull_split_count_i - 1, 8);
 				} else{
 					printf("tree_data_extractor - item number error in toast page, want %d but max %d\n", toast_now_item_offset + 1, tree_data_item_num);
 				}
@@ -1356,7 +1382,10 @@ tree_table_query_creator(){
 				now_data_addr += 8;
 			}
 		}
+		printf("nonnull_split_count\n");
 
+		now_data_addr = addr_auto_padder(toast_now_item_id, now_data_addr, toast_item_rawdata, num_nodes * 3, 8);
+		//printf("addr offset: %x\n", (char *)now_data_addr - (char *)tree_data_page);
 		float** predictions = (float **) malloc(sizeof(float *) * 3);
 		for (int malloc_i = 0 ; malloc_i < 3 ; malloc_i++){
 			predictions[malloc_i] = (float *) malloc(sizeof(float) * num_nodes);
@@ -1372,6 +1401,7 @@ tree_table_query_creator(){
 						toast_item_rawdata = ((char *) PageGetItem(tree_data_page, toast_now_item_id));
 						toast_item_header = (HeapTupleHeader) toast_item_rawdata;
 						now_data_addr = toast_item_rawdata + SizeofHeapTupleHeader + 13;
+						now_data_addr = addr_auto_padder(toast_now_item_id, now_data_addr, toast_item_rawdata, (num_nodes * (3 - predictions_line)) - predictions_i - 1, 8);
 					} else{
 						//printf("tree_data_extractor - item number error in toast page, want %d but max %d\n", toast_now_item_offset + 1, tree_data_item_num);
 						printf("end of page\n");
@@ -1381,6 +1411,7 @@ tree_table_query_creator(){
 				}
 			}
 		}
+		
 		printf("predictions\n");
 		for (int pline = 0 ; pline < 3 ; pline++){
 			printf("line %d\n", pline);
@@ -5814,7 +5845,7 @@ PostgresMain(int argc, char *argv[],
 					if (train_flag){
 						printf("train flag come----\n");
 						char* train_table_create_query = tree_table_query_creator();
-						printf("query: %s\n", train_table_create_query);
+						//printf("query: %s\n", train_table_create_query);
 						exec_simple_query(train_table_create_query);
 						train_flag = false;
 						printf("train flag solved----\n");
