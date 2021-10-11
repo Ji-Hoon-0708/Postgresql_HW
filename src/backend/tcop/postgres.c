@@ -236,6 +236,8 @@ static char *tree_table_name;
 
 #define MAX_OP_NUM			2
 
+#define MAX_NAME_LEN		30
+
 /*--------------------------------------------------------
  *	#define for HW support check query cluster
  *------------------------------------------------------*/
@@ -255,14 +257,17 @@ static char *tree_table_name;
 #define LOGREGR				2
 #define SVM					3
 #define MLP					4
-#define TREE_TR				5
-#define TREE_INF			6
-#define FOREST				7
-#define COUNT				8
-#define MAX					9
-#define MIN					10
-#define AVG					11
-#define SUM					12
+#define TREE				5
+#define FOREST				6
+
+/*--------------------------------------------------------
+ *	#define aggregation operation
+ *------------------------------------------------------*/
+#define COUNT				1
+#define MAX					2
+#define MIN					3
+#define AVG					4
+#define SUM					5
 
 /*--------------------------------------------------------
  *	#define filtering operation
@@ -277,13 +282,6 @@ static char *tree_table_name;
  /*--------------------------------------------------------
   *	Structure for HW-aware SW stack
   *------------------------------------------------------*/
-
-struct WHERE_CLUSTER {
-	bool exist;
-	char* loperand;
-	char* operator;
-	char* roperand;
-} where_cluster = { 0, };
 
 struct HW_IR {
 	// Operation info
@@ -321,6 +319,32 @@ typedef struct output_type
 	double		free_percent;
 } output_type;
 
+struct operation_info{
+	// hw operation info
+	bool hw_support;
+	int hw_operation;
+	// table info
+	char* data_table_name;
+	char* model_table_name; 
+	// if linregr or logregr
+	char* model_col_name;
+	int data_col_len; // can also get from len(coef)
+	char** data_col_name; 
+	// if svm or mlp
+	char* id_col_name;
+	// filtering info
+	bool filter_flag;
+	int filter_operation;
+	char* filter_table_name;
+	char* filter_col_name;
+	float filter_value;
+	// aggregation info
+	bool aggr_flag;
+	int aggr_operation;
+	char* aggr_table_name; // not need
+	char* aggr_table_col; // not need
+};
+
 /*--------------------------------------------------------
  *	Function for HW-aware SW stack
  *------------------------------------------------------*/
@@ -339,6 +363,7 @@ hw_strcmp(char* str1, char* str2) {
 
 	return compare;
 }
+
 
 static int
 hw_queryhashmap(char* str, int query_cluster) {
@@ -368,15 +393,15 @@ hw_ophashmap(char* str) {
 		return SVM;
 	else if (hw_strcmp(str, (char*)"madlib.mlp_predict"))
 		return MLP;
-	/*
-	else if (hw_strcmp(str, (char*)"madlib.tree_train"))
-		return TREE_TR;
-	*/
 	else if (hw_strcmp(str, (char*)"madlib.tree_predict"))
-		return TREE_INF;
+		return TREE;
 	else if (hw_strcmp(str, (char*)"madlib.forest_predict"))
 		return FOREST;
-	else if (hw_strcmp(str, (char*)"COUNT"))
+}
+
+static int
+hw_aggrhashmap(char* str) {
+	if (hw_strcmp(str, (char*)"COUNT"))
 		return COUNT;
 	else if (hw_strcmp(str, (char*)"MAX"))
 		return MAX;
@@ -406,110 +431,346 @@ hw_filterhashmap(char* str) {
 		return 0;
 }
 
-static bool
-hw_support_check(char** word_array, int word_size, int* hw_operation) {
+static void 
+init_operation_info(struct operation_info *info){
+	// hw operation info
+	info->hw_support = false;
+	info->hw_operation = NONE;
+	// table info
+	info->data_table_name = NULL;
+	info->model_table_name = NULL;
+	// if linregr or logregr
+	info->model_col_name = NULL;
+	info->data_col_len = 0;
+	info->data_col_name = NULL;
+	// if svm or mlp
+	info->id_col_name = NULL;
+	// filtering info
+	info->filter_flag = false;
+	info->filter_operation = NONE;
+	info->filter_table_name = NULL;
+	info->filter_col_name = NULL;
+	info->filter_value = 0;
+	// aggregation info
+	info->aggr_flag = false;
+	info->aggr_operation = NONE;
+	info->aggr_table_name = NULL;
+	info->aggr_table_col = NULL;
+}
+
+static void 
+free_operation_info(struct operation_info *info){
+	if (info->hw_support){
+		if (info->data_table_name){
+			free(info->data_table_name);
+		}
+		if (info->model_table_name){
+			free(info->model_table_name);
+		}
+
+		
+		if ((info->hw_operation == LINREGR) | (info->hw_operation == LOGREGR)){
+			if (info->model_col_name){
+				free(info->model_col_name);
+			}
+			for (int i = 0 ; i < info->data_col_len ; i++){
+				if (info->data_col_name[i]){
+					free(info->data_col_name[i]);
+				}
+			}
+			if (info->data_col_name){
+				free(info->data_col_name);
+			}
+		} else if ((info->hw_operation == SVM) | (info->hw_operation == MLP)){
+			if (info->id_col_name){
+				free(info->id_col_name);
+			}
+		}
+		
+		if (info->filter_flag){
+			if (info->filter_table_name){
+				free(info->filter_table_name);
+			}
+			if (info->filter_col_name){
+				free(info->filter_col_name);
+			}
+		}
+		
+		if (info->aggr_flag){
+			if (info->aggr_table_name){
+				free(info->aggr_table_name);
+			}
+			if (info->aggr_table_col){
+				free(info->aggr_table_col);
+			}
+		}
+	}
+
+}
+
+static void
+extract_operation_info(char** word_array, int word_size, struct operation_info *info){
 	int query_cluster = 0;
-	int flag = 0;
-	int idx = 0;
-	int where_i = 0;
-	int hw_op = 0;
-	for (int i = 0; i < word_size; i++) {
-		char* word = word_array[i];
-		query_cluster = hw_queryhashmap(word, query_cluster);
-		switch (query_cluster) {
-		case NONE:
-			flag = 0;
-			break;
-		case SELECT:
-			hw_op = hw_ophashmap(word);
-			if (hw_op) {
-				hw_operation[idx] = hw_op;
-				flag = 1;
-				idx++;
+	int now_idx = 0;
+	int inhib = 0;
+	for (int i = 0 ; i < word_size ; ) {
+		query_cluster = hw_queryhashmap(word_array[i], query_cluster);
+		switch (query_cluster){
+			case NONE:
+				//printf("cluster: NONE\n");
+				info->hw_support = false;
+				if (i == 0){
+					return;
+				}
+				i += 1;
+				break;
+			case SELECT:{
+				//printf("cluster: SELECT\n");
+				int query_check = 0;
+				query_check = hw_ophashmap(word_array[i + 1]);
+				//printf("select op check - %d\n", query_check);
+				if (query_check != NONE){ // madlib operation
+					info->hw_support = true;
+					info->hw_operation = query_check;
+					//printf("operation: %d\n", info->hw_operation);
+					if ((info->hw_operation == LINREGR) | (info->hw_operation == LOGREGR)){
+						//printf("--regression--\n");
+						info->model_col_name = (char *)malloc(sizeof(char) * MAX_NAME_LEN);
+						strcpy(info->model_col_name, word_array[i + 2]);
+						//printf("model_col_name: %s\n", info->model_col_name);
+						if (hw_strcmp(word_array[i + 3], (char*)"ARRAY")){
+							int arr_len = 0;
+							while (!hw_strcmp(word_array[i + 4 + arr_len], (char*)"FROM")){
+								arr_len++;
+							}
+							//printf("arr_len: %d\narr: ", arr_len);
+							info->data_col_len = arr_len;
+							info->data_col_name = (char **)malloc(sizeof(char *) * arr_len);
+							for (int k = 0 ; k < arr_len ; k++){
+								info->data_col_name[k] = (char *)malloc(sizeof(char) * MAX_NAME_LEN);
+								strcpy(info->data_col_name[k], word_array[i + 4 + k]);
+								//printf("[%s] ", info->data_col_name[k]);
+							}
+							//printf("\n");
+							i += (4 + arr_len);
+						}
+					} else if ((info->hw_operation == SVM) | (info->hw_operation == MLP)){
+						//printf("--SVM/MLP--\n");
+						info->model_table_name = (char *)malloc(sizeof(char) * MAX_NAME_LEN);
+						strcpy(info->model_table_name, word_array[i + 2]);
+						//printf("model_table_name: %s\n", info->model_table_name);
+						info->data_table_name = (char *)malloc(sizeof(char) * MAX_NAME_LEN);
+						strcpy(info->data_table_name, word_array[i + 3]);
+						//printf("data_table_name: %s\n", info->data_table_name);
+						info->id_col_name = (char *)malloc(sizeof(char) * MAX_NAME_LEN);
+						strcpy(info->id_col_name, word_array[i + 4]);
+						//printf("id_col_name: %s\n", info->id_col_name);
+						i += 6;
+						if (info->hw_operation == MLP){
+							i += 1;
+						}
+					} else{
+						i += 1;
+					}
+				} else if (query_check = hw_aggrhashmap(word_array[i + 1])){ // aggr operation
+					info->aggr_flag = true;
+					info->aggr_operation = query_check;
+					//printf("aggresion: %d\n", info->aggr_operation);
+
+					char* aggr_table = (char *)malloc(sizeof(char) * MAX_NAME_LEN);
+					strcpy(aggr_table, word_array[i + 2]);
+
+					char* word_token = strtok(aggr_table, ".");
+					int j = 0;
+					while (word_token != NULL){
+						if (j == 0){
+							info->aggr_table_name = (char *)malloc(sizeof(char) * MAX_NAME_LEN);
+							//printf("aggr1: %s\n", word_token);
+							strcpy(info->aggr_table_name, word_token);
+						} else if (j == 1){
+							info->aggr_table_col = (char *)malloc(sizeof(char) * MAX_NAME_LEN);
+							//printf("aggr2: %s\n", word_token);
+							strcpy(info->aggr_table_col, word_token);
+						} else{
+							printf("not considered case occured\n");
+							break;
+						}
+						j++;
+						word_token = strtok(NULL, ".");
+					}
+					free(aggr_table);
+					i += 3;
+				} else{ // not supported
+					info->hw_support = false;
+					return;
+				}
+				break;
 			}
-			break;
-		case FROM:
-			if (hw_strcmp(word, (char*)"JOIN"))
-				flag = 0;
-			break;
-		case WHERE:
-			switch (where_i) {
-			case 0: 
-				where_cluster.exist = 1;
-				where_i++;
-				break;
-			case 1:
-				if(word != NULL) {
-					where_cluster.loperand = word;
-					where_i++;
+			case FROM:
+				//printf("cluster: FROM\n");
+				if ((info->hw_support) & 
+				   ((info->hw_operation == LINREGR) | (info->hw_operation == LOGREGR))){
+				    info->model_table_name = (char *)malloc(sizeof(char) * MAX_NAME_LEN);
+					strcpy(info->model_table_name, word_array[i + 1]);
+					//printf("model_table_name: %s\n", info->model_table_name);
+					info->data_table_name = (char *)malloc(sizeof(char) * MAX_NAME_LEN);
+					strcpy(info->data_table_name, word_array[i + 2]);
+					//printf("data_table_name: %s\n", info->data_table_name);
+					i += 3;			
+				} else{
+					i += 1;
 				}
 				break;
-			case 2:
-				if(word != NULL) {
-					where_cluster.operator = word;
-					where_i++;
+			case WHERE:
+				//printf("cluster: WHERE\n");
+				info->filter_flag = true;
+				char* filter_table = (char *)malloc(sizeof(char) * MAX_NAME_LEN);
+				strcpy(filter_table, word_array[i + 1]);
+
+				char* word_token = strtok(filter_table, ".");
+				int j = 0;
+				while (word_token != NULL){
+					if (j == 0){
+						info->filter_table_name = (char *)malloc(sizeof(char) * MAX_NAME_LEN);
+						//printf("filter1: %s\n", word_token);
+						strcpy(info->filter_table_name, word_token);
+					} else if (j == 1){
+						info->filter_col_name = (char *)malloc(sizeof(char) * MAX_NAME_LEN);
+						//printf("filter2: %s\n", word_token);
+						strcpy(info->filter_col_name, word_token);
+					} else{
+						printf("not considered case occured\n");
+						break;
+					}
+					j++;
+					word_token = strtok(NULL, ".");
 				}
+				free(filter_table);
+				info->filter_operation = hw_filterhashmap(word_array[i + 2]);
+				//printf("filter_operation: %d\n", info->filter_operation);
+				info->filter_value = atof(word_array[i + 3]);
+				//printf("filter value: %f\n", info->filter_value);
+				i += 4;
 				break;
-			case 3:
-				if(word != NULL) {
-					where_cluster.roperand = word;
-					where_i = 0;
-				}
+			case GROUP_BY:
+				//printf("cluster: GROUP_BY\n");
+				info->hw_support = false;
 				break;
-			}
-			break;
-		case GROUP_BY:
-			flag = 0;
-			break;
-		case ORDER_BY:
-			flag = 0;
+			case ORDER_BY:
+				//printf("cluster: ORDER_BY\n");
+				info->hw_support = false;
+				break;
+			default:
+				i += 1;
+				break;
+		}
+		inhib++;
+		if (inhib > 20){
 			break;
 		}
 	}
-	return flag;
+	return;
 }
 
-static void
-hw_query_modification(char** word_array, const char* query_string_modified, const char* query_string) {
-	if(word_array[2] != NULL && word_array[3] != NULL) {
-		strcpy(query_string_modified, "SELECT * FROM ");
-		strcat(query_string_modified, word_array[2]);
-		strcat(query_string_modified, ", ");
-		strcat(query_string_modified, word_array[3]);
-		strcat(query_string_modified, ";");
-	}
-	else
-		strcpy(query_string_modified, ";");
-}
+void printf_op_info(struct operation_info info){
+	printf("\t-------operation info debugging-------\n\t");
 
-static void
-hw_rtable_extract(Query* query, int* rtable_id, int* rtable_relid, char** rtable_name, int* rtable_colnum, unsigned long long int* rtable_colsel, char*** rtable_colname) {
-	ListCell* rtable_list;
-
-	int idx = 0;
-	foreach(rtable_list, query->rtable) {
-		//printf("hw stack debug - hw_rtable_extract\nidx: %d\n", idx);
-		RangeTblEntry* rtbl = lfirst_node(RangeTblEntry, rtable_list);
-		
-		rtable_id[idx] = idx;
-		rtable_relid[idx] = rtbl->relid;
-		rtable_name[idx] = rtbl->eref->aliasname;
-
-		int col_num = list_length(rtbl->eref->colnames);
-		rtable_colnum[idx] = col_num;
-		rtable_colsel[idx] = *(rtbl->selectedCols->words);
-		rtable_colname[idx] = (char**)malloc(sizeof(char*)*col_num); 
-		
-		ListCell* columns;
-		int col_idx = 0;	
-		foreach(columns, rtbl->eref->colnames) {
-			char* colname = strVal(lfirst(columns));
-			rtable_colname[idx][col_idx] = colname;
-			col_idx++;			
+	printf("hw_support: %s\n\t", info.hw_support ? "True" : "False");
+	if (info.hw_support){
+		switch (info.hw_operation){
+			case LINREGR:
+				printf("hw_operation: %s\n\t", "LINREGR");
+				break;
+			case LOGREGR:
+				printf("hw_operation: %s\n\t", "LOGREGR");
+				break;
+			case SVM:
+				printf("hw_operation: %s\n\t", "SVM");
+				break;
+			case MLP:
+				printf("hw_operation: %s\n\t", "MLP");
+				break;
+			case TREE:
+				printf("hw_operation: %s\n\t", "TREE");
+				break;	
+			case FOREST:
+				printf("hw_operation: %s\n\t", "FOREST");
+				break;				
 		}
-		//printf("check, arr: %d, data: %d\n", rtable_relid[idx], rtbl->relid);
-		idx++;
+		printf("data_table_name: %s\n\t", info.data_table_name);
+		printf("model_table_name: %s\n\t", info.model_table_name);
+		
+		if ((info.hw_operation == LINREGR) | (info.hw_operation == LOGREGR)){
+			printf("model_col_name: %s\n\t", info.model_col_name);
+			printf("data_col_len: %d\n\t", info.data_col_len);
+			printf("data_col_name: ");
+			for (int i = 0 ; i < info.data_col_len ; i++){
+				printf("[%s] ", info.data_col_name[i]);
+			}
+			printf("\n\t");
+			printf("model_col_name: %s\n\t", info.model_col_name);
+		} else if ((info.hw_operation == SVM) | (info.hw_operation == MLP)){
+			printf("id_col_name: %s\n\t", "info.id_col_name");
+		}
+
+		if (info.filter_flag){
+			printf("-------filter information exists\n\t");
+			switch (info.filter_operation){
+				case LARGER:
+					printf("filter_flag: %s\n\t", "LARGER (>)");
+					break;
+				case LARGERSAME:
+					printf("filter_flag: %s\n\t", "LARGERSAME (>=)");
+					break;
+				case SAME:
+					printf("filter_flag: %s\n\t", "SAME (=)");
+					break;
+				case SMALLER:
+					printf("filter_flag: %s\n\t", "SMALLER (<)");
+					break;
+				case SMALLERSAME:
+					printf("filter_flag: %s\n\t", "SMALLERSAME (<=)");
+					break;			
+			}
+			printf("filter_table_name: %s\n\t", info.filter_table_name);
+			printf("filter_col_name: %s\n\t", info.filter_col_name);
+			printf("filter_value: %f\n\t", info.filter_value);
+		} 
+
+		if (info.aggr_flag){
+			printf("-------aggregation information exists\n\t");
+			switch (info.aggr_operation){
+				case COUNT:
+					printf("aggr_flag: %s\n\t", "COUNT");
+					break;		
+				case MAX:
+					printf("aggr_flag: %s\n\t", "MAX");
+					break;
+				case MIN:
+					printf("aggr_flag: %s\n\t", "MIN");
+					break;
+				case AVG:
+					printf("aggr_flag: %s\n\t", "AVG");
+					break;
+				case SUM:
+					printf("aggr_flag: %s\n\t", "SUM");
+					break;		
+			}
+			printf("aggr_table_name: %s\n\t", info.aggr_table_name);
+			printf("aggr_table_col: %s\n\t", info.aggr_table_col);
+		} 
 	}
+
+	printf("--------------------------------------\n");
+}
+
+static void
+hw_query_modification(char* data_table_name, char* model_table_name, char* new_query) {
+	strcpy(new_query, "SELECT * FROM ");
+	strcat(new_query, data_table_name);
+	strcat(new_query, ", ");
+	strcat(new_query, model_table_name);
+	strcat(new_query, ";");
 }
 
 static int64
@@ -623,6 +884,39 @@ hw_get_table_size(int oid) {
 }
 
 static void
+hw_rtable_extract(Query* query, int* rtable_id, int* rtable_relid, char** rtable_name, int* rtable_colnum, unsigned long long int* rtable_colsel, char*** rtable_colname, int *table_size) {
+	ListCell* rtable_list;
+
+	int idx = 0;
+	foreach(rtable_list, query->rtable) {
+		//printf("hw stack debug - hw_rtable_extract\nidx: %d\n", idx);
+		RangeTblEntry* rtbl = lfirst_node(RangeTblEntry, rtable_list);
+		
+		rtable_id[idx] = idx;
+		rtable_relid[idx] = rtbl->relid;
+		rtable_name[idx] = (char *)malloc(sizeof(char *) * strlen(rtbl->eref->aliasname));
+		strcpy(rtable_name[idx], rtbl->eref->aliasname);
+
+		int col_num = list_length(rtbl->eref->colnames);
+		rtable_colnum[idx] = col_num;
+		rtable_colsel[idx] = *(rtbl->selectedCols->words);
+		rtable_colname[idx] = (char**)malloc(sizeof(char*)*col_num); 
+		
+		ListCell* columns;
+		int col_idx = 0;	
+		foreach(columns, rtbl->eref->colnames) {
+			char* colname = strVal(lfirst(columns));
+			rtable_colname[idx][col_idx] = (char *)malloc(sizeof(char *) * strlen(colname));
+			strcpy(rtable_colname[idx][col_idx], colname);
+			col_idx++;			
+		}
+		//printf("check, arr: %d, data: %d\n", rtable_relid[idx], rtbl->relid);
+		table_size[idx] = hw_get_table_size(rtable_relid[idx]);
+		idx++;
+	}
+}
+
+static void
 hw_str_delete(char* str, char ch) {
 	for(; *str!='\0'; str++) {
 		if(*str == ch) {
@@ -632,74 +926,6 @@ hw_str_delete(char* str, char ch) {
 	}
 }
 
-static void
-hw_reconstructor(int* hw_operation, int rtable_num, int* rtable_id, int* rtable_relid, char** rtable_name, int* rtable_colnum, unsigned long long int* rtable_colsel, char*** rtable_colname) {
-	// Operation & aggregation info
-	for(int i=0; i<MAX_OP_NUM; i++) {
-		if(hw_operation[i] != 0) {	// ML operation
-			if(hw_operation[i] < COUNT)
-				hw_ir.operation = hw_operation[i];
-			else {					// Agg operation
-				hw_ir.aggr_flag = 1;
-				hw_ir.aggr_op = hw_operation[i];
-			}
-		}
-	}
-
-	// Rtable info
-	if(rtable_num == 2) {	// When rtable_num == 2, considering this query includes ML operation (model, data)
-		// Model table
-		hw_ir.model_table_relid = rtable_relid[0];
-		hw_ir.model_table_selcol = rtable_colsel[0];
-		// Data table
-		hw_ir.data_table_relid = rtable_relid[1];
-		hw_ir.data_table_selcol = rtable_colsel[1];
-	}
-	else {					// Others, considering this query is relational query
-		// Data table
-		hw_ir.data_table_relid = rtable_relid[0];
-		hw_ir.data_table_selcol = rtable_colsel[0];
-	}
-
-	// Filtering info
-	if(where_cluster.exist) {
-		hw_ir.filter_flag = where_cluster.exist;
-		// Left operand define
-		char* loperand;
-		int rtable_idx = 0;
-		if(where_cluster.loperand != NULL)
-			loperand = strtok(where_cluster.loperand, ".");
-		while(loperand != NULL) {
-			for(int i=0; i<rtable_num; i++) {
-				if(strcasecmp(loperand, rtable_name[i])==0) {
-					rtable_idx = i;
-					hw_ir.filter_table = rtable_relid[i];
-				}
-			}
-			for(int i=0; i<rtable_colnum[rtable_idx]; i++) {
-				if(strcasecmp(loperand, rtable_colname[rtable_idx][i])==0)
-					hw_ir.filter_col = i;
-			}
-			loperand = strtok(NULL, ".");
-		}
-
-		// Operand define
-		if(where_cluster.operator != NULL)
-			hw_ir.filter_op = hw_filterhashmap(where_cluster.operator);
-
-		// Right operand deifne
-		if(where_cluster.roperand != NULL)
-			hw_ir.filter_value = atof(where_cluster.roperand);
-	}
-	
-	// Table size info
-	if(hw_ir.model_table_relid != 0)
-		hw_ir.model_table_size = hw_get_table_size(hw_ir.model_table_relid);
-	if(hw_ir.data_table_relid != 0)
-		hw_ir.data_table_size = hw_get_table_size(hw_ir.data_table_relid);
-}
-
-// added newly
 static Page
 get_page_from_raw(bytea *raw_page)
 {
@@ -761,7 +987,6 @@ int_debug_print(int* variable, int var_len, int typeflag){ // 0 for int / 1 for 
 		} else if (typeflag == 1){
 			printf("%4x ", variable[print_i]);
 		}
-
 		linecnt++;
 	}
 	printf("\n");
@@ -858,283 +1083,6 @@ dumpmem(unsigned char *buff, int len){
 	}
 	printf("\n");
 } 
-
-/*
-static void 
-tree_data_extractor(Oid tree_table_oid){
-	printf("tree_data_extractor - oid: %d\n", tree_table_oid);
-	Relation tree_table;
-	if (!(tree_table = try_relation_open(tree_table_oid, AccessShareLock))){
-		printf("tree_data_extractor - Oid error occured\n");
-	}
-	
-	// obtain data of tree table
-	bytea *tree_raw_page = get_raw_from_rel(tree_table);
-	relation_close(tree_table, AccessShareLock);
-
-	Page tree_page = get_page_from_raw(tree_raw_page);
-	int tree_item_num = PageGetMaxOffsetNumber(tree_page);
-	PageHeader tree_page_header = (PageHeader) tree_page;
-	LocationIndex tree_page_lower = tree_page_header->pd_lower;
-	LocationIndex tree_page_upper = tree_page_header->pd_upper;	
-	
-	printf("tree_data_extractor - page debug\ntree_table_lower: %x\ntree_table_upper: %x\ntree_item_num: %d\n", 
-						tree_page_lower, tree_page_upper, tree_item_num);
-	
-	int now_item_offset = 1;
-	ItemId now_item_id = PageGetItemId(tree_page, now_item_offset);
-	char *tree_item_rawdata = ((char *) PageGetItem(tree_page, now_item_id));
-	HeapTupleHeader tree_item_header = (HeapTupleHeader) tree_item_rawdata;
-	printf("now_item_id check, off: %x, len: %d\n", now_item_id->lp_off, now_item_id->lp_len);
-	//printf("header data debug\nt_infomask: %x\nt_infomask2: %x\n", tree_item_header->t_infomask, tree_item_header->t_infomask2);
-	printf("check item first data, (%x) (%x) (%x) (%x)\n", *((uint16_t *)(tree_item_rawdata + SizeofHeapTupleHeader + 1)), 
-														   *((uint16_t *)(tree_item_rawdata + SizeofHeapTupleHeader + 3)), 
-														   *((uint16_t *)(tree_item_rawdata + SizeofHeapTupleHeader + 5)), 
-														   *((uint16_t *)(tree_item_rawdata + SizeofHeapTupleHeader + 7)));
-	
-	// Toast raw table check
-	if (OidIsValid(tree_table->rd_rel->reltoastrelid)){
-		Oid tree_data_table_oid = tree_table->rd_rel->reltoastrelid;
-		Relation tree_data_table;
-		printf("tree_data_extractor - toast occured (relname: %s)\n", tree_table->rd_rel->relname);
-		printf("reltoastrelid: %d\n", tree_data_table_oid);
-		if (!(tree_data_table = try_relation_open(tree_data_table_oid, AccessShareLock))){
-			printf("hw stack debug - TOAST Oid error occured\n");
-		}
-		bytea *tree_data_raw_page = get_raw_from_rel(tree_data_table);
-		relation_close(tree_data_table, AccessShareLock);
-
-		Page tree_data_page = get_page_from_raw(tree_data_raw_page);
-		int tree_data_item_num = PageGetMaxOffsetNumber(tree_data_page);
-		PageHeader tree_data_page_header = (PageHeader) tree_data_page;
-		LocationIndex tree_data_page_lower = tree_data_page_header->pd_lower;
-		LocationIndex tree_data_page_upper = tree_data_page_header->pd_upper;	
-		
-		printf("tree_data_extractor - toast page debug\ntree_table_lower: %x\ntree_table_upper: %x\ntree_data_item_num: %d\n", 
-							tree_data_page_lower, tree_data_page_upper, tree_data_item_num);
-
-		int toast_now_item_offset = 1;
-		ItemId toast_now_item_id = PageGetItemId(tree_data_page, toast_now_item_offset);
-		char *toast_item_rawdata = ((char *) PageGetItem(tree_data_page, toast_now_item_id));
-		HeapTupleHeader toast_item_header = (HeapTupleHeader) toast_item_rawdata;
-		//printf("toast now_item_id check, off: %x, len: %d\n", toast_now_item_id->lp_off, toast_now_item_id->lp_len);
-		//printf("toast header data debug\nt_infomask: %x\nt_infomask2: %x\n", toast_item_header->t_infomask, toast_item_header->t_infomask2);
-		
-		//printf("toast check item first data, (%x) (%x) (%x) (%x)\n", *((uint16_t *)(toast_item_rawdata + SizeofHeapTupleHeader + 13)), 
-		//														     *((uint16_t *)(toast_item_rawdata + SizeofHeapTupleHeader + 15)), 
-		//													  	     *((uint16_t *)(toast_item_rawdata + SizeofHeapTupleHeader + 17)), 
-		//														     *((uint16_t *)(toast_item_rawdata + SizeofHeapTupleHeader + 19)));
-		
-		//printf("addr test: page: %p, raw item data: %p\n", tree_data_page, toast_item_rawdata);
-		
-		char *now_data_addr = toast_item_rawdata + SizeofHeapTupleHeader + 17;
-		uint16_t tree_depth = *((uint16_t *)(now_data_addr));
-		if (!carefully_incl_addr(toast_now_item_id, toast_item_rawdata, now_data_addr, 2)){
-			// item change
-			if ((toast_now_item_offset + 1) <= tree_data_item_num){
-				toast_now_item_offset++;
-				toast_now_item_id = PageGetItemId(tree_data_page, toast_now_item_offset);
-				toast_item_rawdata = ((char *) PageGetItem(tree_data_page, toast_now_item_id));
-				toast_item_header = (HeapTupleHeader) toast_item_rawdata;
-				now_data_addr = toast_item_rawdata + SizeofHeapTupleHeader + 13;
-			} else{
-				printf("tree_data_extractor - item number error in toast page, want %d but max %d\n", toast_now_item_offset + 1, tree_data_item_num);
-			}
-		} else{
-			now_data_addr += 2;
-		}
-
-		uint16_t n_y_labels = *((uint16_t *)(now_data_addr));
-		if (!carefully_incl_addr(toast_now_item_id, toast_item_rawdata, now_data_addr, 2)){
-			// item change
-			if ((toast_now_item_offset + 1) <= tree_data_item_num){
-				toast_now_item_offset++;
-				toast_now_item_id = PageGetItemId(tree_data_page, toast_now_item_offset);
-				toast_item_rawdata = ((char *) PageGetItem(tree_data_page, toast_now_item_id));
-				toast_item_header = (HeapTupleHeader) toast_item_rawdata;
-				now_data_addr = toast_item_rawdata + SizeofHeapTupleHeader + 13;
-			} else{
-				printf("tree_data_extractor - item number error in toast page, want %d but max %d\n", toast_now_item_offset + 1, tree_data_item_num);
-			}
-		} else{
-			now_data_addr += 2;
-		}
- 		
-		uint16_t max_n_surr = *((uint16_t *)(now_data_addr));
-		if (!carefully_incl_addr(toast_now_item_id, toast_item_rawdata, now_data_addr, 2)){
-			// item change
-			if ((toast_now_item_offset + 1) <= tree_data_item_num){
-				toast_now_item_offset++;
-				toast_now_item_id = PageGetItemId(tree_data_page, toast_now_item_offset);
-				toast_item_rawdata = ((char *) PageGetItem(tree_data_page, toast_now_item_id));
-				toast_item_header = (HeapTupleHeader) toast_item_rawdata;
-				now_data_addr = toast_item_rawdata + SizeofHeapTupleHeader + 13;
-			} else{
-				printf("tree_data_extractor - item number error in toast page, want %d but max %d\n", toast_now_item_offset + 1, tree_data_item_num);
-			}
-		} else{
-			now_data_addr += 2;
-		}
-    	
-		bool is_regression = *((bool *)(now_data_addr));
-		if (!carefully_incl_addr(toast_now_item_id, toast_item_rawdata, now_data_addr, 2)){
-			// item change
-			if ((toast_now_item_offset + 1) <= tree_data_item_num){
-				toast_now_item_offset++;
-				toast_now_item_id = PageGetItemId(tree_data_page, toast_now_item_offset);
-				toast_item_rawdata = ((char *) PageGetItem(tree_data_page, toast_now_item_id));
-				toast_item_header = (HeapTupleHeader) toast_item_rawdata;
-				now_data_addr = toast_item_rawdata + SizeofHeapTupleHeader + 13;
-			} else{
-				printf("tree_data_extractor - item number error in toast page, want %d but max %d\n", toast_now_item_offset + 1, tree_data_item_num);
-			}
-		} else{
-			now_data_addr += 2;
-		}
-    	
-		uint16_t impurity_type = *((uint16_t *)(now_data_addr));
-		if (!carefully_incl_addr(toast_now_item_id, toast_item_rawdata, now_data_addr, 4)){
-			// item change
-			if ((toast_now_item_offset + 1) <= tree_data_item_num){
-				toast_now_item_offset++;
-				toast_now_item_id = PageGetItemId(tree_data_page, toast_now_item_offset);
-				toast_item_rawdata = ((char *) PageGetItem(tree_data_page, toast_now_item_id));
-				toast_item_header = (HeapTupleHeader) toast_item_rawdata;
-				now_data_addr = toast_item_rawdata + SizeofHeapTupleHeader + 13;
-			} else{
-				printf("tree_data_extractor - item number error in toast page, want %d but max %d\n", toast_now_item_offset + 1, tree_data_item_num);
-			}
-		} else{
-			now_data_addr += 4;
-		}
-		
-		int num_nodes = pow(2,tree_depth) - 1;
-		printf("tree_data_extractor - toast page data debug\ntree_depth: %d\nn_y_labels: %d\nmax_n_surr: %d\nis_regression: %s\nimpurity_type: %d\nnum_nodes: %d\n", 
-										tree_depth, n_y_labels, max_n_surr, (is_regression ? "True" : "False"), impurity_type, num_nodes);
-		
-		int* feature_indices = (int *) malloc(sizeof(int) * num_nodes);
-		for (int feature_indices_i = 0 ; feature_indices_i < num_nodes ; feature_indices_i++){
-			feature_indices[feature_indices_i] = *((int *)(now_data_addr));
-			if (!carefully_incl_addr(toast_now_item_id, toast_item_rawdata, now_data_addr, 4)){
-				// item change
-				if ((toast_now_item_offset + 1) <= tree_data_item_num){
-					toast_now_item_offset++;
-					toast_now_item_id = PageGetItemId(tree_data_page, toast_now_item_offset);
-					toast_item_rawdata = ((char *) PageGetItem(tree_data_page, toast_now_item_id));
-					toast_item_header = (HeapTupleHeader) toast_item_rawdata;
-					now_data_addr = toast_item_rawdata + SizeofHeapTupleHeader + 13;
-				} else{
-					printf("tree_data_extractor - item number error in toast page, want %d but max %d\n", toast_now_item_offset + 1, tree_data_item_num);
-				}
-			} else{
-				now_data_addr += 4;
-			}
-		}
-		printf("feature_indices\n");
-		int_debug_print(feature_indices, num_nodes, 0);
-		
-		float* feature_thresholds = (float *) malloc(sizeof(float) * num_nodes);
-		for (int feature_thresholds_i = 0 ; feature_thresholds_i < num_nodes ; feature_thresholds_i++){
-			feature_thresholds[feature_thresholds_i] = (float) *((double *)(now_data_addr));
-			if (!carefully_incl_addr(toast_now_item_id, toast_item_rawdata, now_data_addr, 8)){
-				// item change
-				if ((toast_now_item_offset + 1) <= tree_data_item_num){
-					toast_now_item_offset++;
-					toast_now_item_id = PageGetItemId(tree_data_page, toast_now_item_offset);
-					toast_item_rawdata = ((char *) PageGetItem(tree_data_page, toast_now_item_id));
-					toast_item_header = (HeapTupleHeader) toast_item_rawdata;
-					now_data_addr = toast_item_rawdata + SizeofHeapTupleHeader + 13;
-				} else{
-					printf("tree_data_extractor - item number error in toast page, want %d but max %d\n", toast_now_item_offset + 1, tree_data_item_num);
-				}
-			} else{
-				now_data_addr += 8;
-			}
-		}
-		printf("feature_thresholds\n");
-		float_debug_print(feature_thresholds, num_nodes, 0);
-
-		int* is_categorical = (int *) malloc(sizeof(int) * num_nodes);
-		for (int is_categorical_i = 0 ; is_categorical_i < num_nodes ; is_categorical_i++){
-			is_categorical[is_categorical_i] = *((int *)(now_data_addr));
-			if (!carefully_incl_addr(toast_now_item_id, toast_item_rawdata, now_data_addr, 4)){
-				// item change
-				if ((toast_now_item_offset + 1) <= tree_data_item_num){
-					toast_now_item_offset++;
-					toast_now_item_id = PageGetItemId(tree_data_page, toast_now_item_offset);
-					toast_item_rawdata = ((char *) PageGetItem(tree_data_page, toast_now_item_id));
-					toast_item_header = (HeapTupleHeader) toast_item_rawdata;
-					now_data_addr = toast_item_rawdata + SizeofHeapTupleHeader + 13;
-				} else{
-					printf("tree_data_extractor - item number error in toast page, want %d but max %d\n", toast_now_item_offset + 1, tree_data_item_num);
-				}
-			} else{
-				now_data_addr += 4;
-			}
-		}
-		printf("is_categorical\n");
-		int_debug_print(is_categorical, num_nodes, 0);
-
-		now_data_addr += 4; // padding
-
-		float* nonnull_split_count = (float *) malloc(sizeof(float) * (num_nodes * 2));
-		for (int nonnull_split_count_i = 0 ; nonnull_split_count_i < (num_nodes * 2) ; nonnull_split_count_i++){
-			nonnull_split_count[nonnull_split_count_i] = (float) *((double *)(now_data_addr));
-			if (!carefully_incl_addr(toast_now_item_id, toast_item_rawdata, now_data_addr, 8)){
-				// item change
-				if ((toast_now_item_offset + 1) <= tree_data_item_num){
-					toast_now_item_offset++;
-					toast_now_item_id = PageGetItemId(tree_data_page, toast_now_item_offset);
-					toast_item_rawdata = ((char *) PageGetItem(tree_data_page, toast_now_item_id));
-					toast_item_header = (HeapTupleHeader) toast_item_rawdata;
-					now_data_addr = toast_item_rawdata + SizeofHeapTupleHeader + 13;
-				} else{
-					printf("tree_data_extractor - item number error in toast page, want %d but max %d\n", toast_now_item_offset + 1, tree_data_item_num);
-				}
-			} else{
-				now_data_addr += 8;
-			}
-		}
-		printf("nonnull_split_count\n");
-		float_debug_print(nonnull_split_count, (num_nodes * 2), 0);
-
-		//printf("memory dump for debugging\n");
-		//dumpmem(now_data_addr, 300);
-
-		float** predictions = (float **) malloc(sizeof(float *) * 3);
-		for (int malloc_i = 0 ; malloc_i < 3 ; malloc_i++){
-			predictions[malloc_i] = (float *) malloc(sizeof(float) * num_nodes);
-		}
-		for (int predictions_line = 0 ; predictions_line < 3 ; predictions_line++){
-			for (int predictions_i = 0 ; predictions_i < num_nodes ; predictions_i++){
-				predictions[predictions_line][predictions_i] = (float) *((double *)(now_data_addr));
-				if (!carefully_incl_addr(toast_now_item_id, toast_item_rawdata, now_data_addr, 8)){
-					// item change
-					if ((toast_now_item_offset + 1) <= tree_data_item_num){
-						toast_now_item_offset++;
-						toast_now_item_id = PageGetItemId(tree_data_page, toast_now_item_offset);
-						toast_item_rawdata = ((char *) PageGetItem(tree_data_page, toast_now_item_id));
-						toast_item_header = (HeapTupleHeader) toast_item_rawdata;
-						now_data_addr = toast_item_rawdata + SizeofHeapTupleHeader + 13;
-					} else{
-						//printf("tree_data_extractor - item number error in toast page, want %d but max %d\n", toast_now_item_offset + 1, tree_data_item_num);
-						printf("end of page\n");
-					}
-				} else{
-					now_data_addr += 8;
-				}
-			}
-		}
-		printf("predictions\n");
-		for (int pline = 0 ; pline < 3 ; pline++){
-			printf("line %d\n", pline);
-			float_debug_print(predictions[pline], num_nodes, 0);
-		}
-	} else{
-		printf("error - no toast relation in tree table\n");
-	}
-}
-*/
 
 static char*
 tree_table_query_creator(){
@@ -1539,185 +1487,184 @@ tree_table_query_creator(){
 }
 
 static void
-sw_stack_for_hw(const char* query_string, List* querytrees) {
+sw_stack_for_hw(const char* query_string, List* querytrees){
+	
 	int query_length = strlen(query_string);
-	char* query_str = (char*)malloc(sizeof(char)*(query_length+1));
+	char* query_str = (char*)malloc(sizeof(char) * (query_length + 1));
 	strcpy(query_str, query_string);
 
 	int word_size = 0;
-	char** word_array = (char**)malloc(sizeof(char*)*query_length);
-	
-	char* word_tmp;
-	word_tmp = strtok(query_str, " ,()[]\n'");
-	while(word_tmp != NULL) {
-		word_array[word_size] = word_tmp;
+	char** word_array = (char**)malloc(sizeof(char *) * (query_length + 1));
+
+    char* word_tmp;
+    word_tmp = strtok(query_str, " ,()[];\n'");
+	while (word_tmp != NULL) {
+        word_array[word_size] = (char *)malloc(sizeof(char) * 25);
+		strcpy(word_array[word_size], word_tmp);
 		word_size++;
-		word_tmp = strtok(NULL, " ,()[]\n'");
+		word_tmp = strtok(NULL, " ,()[];\n'");
 	}
-
-	// Removing last ';'
-	int tmp = 0;
-	while(word_array[word_size-1][tmp])
-		tmp++;
-	if(word_array[word_size-1] != NULL)
-		word_array[word_size-1][tmp-1] = '\0';
-
+	// extra check for train phase (tree)
 	for (int i = 0 ; i < word_size ; i++){
 		if (hw_strcmp(word_array[i], (char*)"madlib.tree_train")){
-			printf("train found -> setting flag\n");
+			//printf("train found -> setting flag\n");
 			train_flag = true;
 			tree_table_name = (char *)malloc(sizeof(char) * 100);
 			strcpy(tree_table_name, word_array[3]);
-			printf("trage table = %s\n", tree_table_name);
+			//printf("trage table = %s\n", tree_table_name);
 		}
 	}
 
-	/*--------------------------------------------------------
-	 *	HW Checker
-	 *	Check whether query can be offloaded to HW or not
-	 *	0: HW cannot support	number: HW can support
-	 *------------------------------------------------------*/	
-	bool hw_supported = 0;
-	int hw_operation[MAX_OP_NUM] = { 0 };
-	hw_supported = hw_support_check(word_array, word_size, hw_operation);
-	/*
-	printf("hw stack debug - hardware support: %s\n", hw_supported ? "True" : "False");
-	printf("hw stack debug - word_array: ");
-	for (int j = 0 ; j < word_size - 1 ; j++){
-		printf("[%s] ", word_array[j]);
+	// extrack HW operation information
+	struct operation_info op_info;
+	init_operation_info(&op_info);
+	extract_operation_info(word_array, word_size, &op_info);
+	printf_op_info(op_info);
+	
+	free(query_str);
+	for (int word_arr_cnt = 0 ; word_arr_cnt < word_size ; word_arr_cnt++){
+		free(word_array[word_arr_cnt]);
 	}
-	printf("\n");
-	*/
-	/*--------------------------------------------------------
-	 *	When HW can support query
-	 *------------------------------------------------------*/
-	int rtable_num = 0;
-	int* rtable_id;
-	int* rtable_relid;
-	char** rtable_name;
-	int* rtable_colnum;
-	unsigned long long int* rtable_colsel;
-	char*** rtable_colname;
+	free(word_array);
 
-	List* querytrees_sel;
-	ListCell* query_list;
-
-	int now_op_num;
-
-	if(hw_supported) {
-		/*----------------------------------------------------
-		 *	HW Query Modification
-		 *	For non-SQL format madlib operation, modiying query 
-		 *  to extract data
-		 *--------------------------------------------------*/
-		int modification_flag = 0;
-		const char* query_string_modified = (char*)malloc(sizeof(char)*(query_length+1));
-		for(int i=0; i<MAX_OP_NUM; i++) {
-			if(hw_operation[i] == SVM || hw_operation[i] == MLP || hw_operation[i] == TREE_INF){
-				if(hw_strcmp(word_array[0], "SELECT")){
-					modification_flag = 1;
-					now_op_num = hw_operation[i];
-				}
-			}
+	// hw support operation
+	if (op_info.hw_support){
+		printf("hw supported\n");
+		// get oids and size of data and model table
+		char* data_model_query = (char*)malloc(sizeof(char) * (20 + strlen(op_info.data_table_name) + strlen(op_info.model_table_name)));
+		hw_query_modification(op_info.data_table_name, op_info.model_table_name, data_model_query);
+		
+		List* data_model_parsetree_list;
+		ListCell* data_model_parsetree_item;
+		List* data_model_querytree_list;
+		data_model_parsetree_list = pg_parse_query(data_model_query);
+		foreach(data_model_parsetree_item, data_model_parsetree_list) {
+			RawStmt* parsetree_modified = lfirst_node(RawStmt, data_model_parsetree_item);
+			data_model_querytree_list = pg_analyze_and_rewrite(parsetree_modified, data_model_query, NULL, 0, NULL);
 		}
-		printf("hw stack debug - modification_flag: %s\n", modification_flag ? "True" : "False");
-		List* parsetree_list_modified;
-		ListCell* parsetree_item_modified;
-		List* querytree_list_modified;
-		if(modification_flag) {
-			hw_query_modification(word_array, query_string_modified, query_string);
-			printf("hw stack debug - hw_query_modification\nquery_string: %s\nquery_string_modified: %s\n", query_string, query_string_modified);
-			parsetree_list_modified = pg_parse_query(query_string_modified);
-			foreach(parsetree_item_modified, parsetree_list_modified) {
-				RawStmt* parsetree_modified = lfirst_node(RawStmt, parsetree_item_modified);
-				querytree_list_modified = pg_analyze_and_rewrite(parsetree_modified, query_string_modified, NULL, 0, NULL);
-			}
-			querytrees_sel = querytree_list_modified;
-		}
-		else
-			querytrees_sel = querytrees;
-
-
-		/*----------------------------------------------------
-		 *	HW Reconstructor
-		 *	Restruct the query_tree to hw-aware IR form
-		 *  Using structure (hw_ir)
-		 *--------------------------------------------------*/
-		foreach(query_list, querytrees_sel) {
+		free(data_model_query);
+		
+		int rtable_num = 0;
+		int* rtable_id;
+		int* rtable_relid;
+		char** rtable_name;
+		int* rtable_colnum;
+		unsigned long long int* rtable_colsel;
+		char*** rtable_colname;
+		int query_num = 0;
+		int* table_size;
+		// 0th: data table, 1th: data table
+		ListCell* query_list;
+		foreach(query_list, data_model_querytree_list) {
 			Query* query = lfirst_node(Query, query_list);
-			bool subquery_exist;
-			Query* subquery;
-
-			// Subquery check
-			ListCell* rtable_list;
-			foreach(rtable_list, query->rtable) {
-				RangeTblEntry* rtble = lfirst_node(RangeTblEntry, rtable_list);	
-				if(rtble->subquery == NULL) {
-					subquery_exist = 0;
-					subquery = NULL;
-				}
-				else {
-					subquery_exist = 1;
-					subquery = rtble->subquery;
-				}
-			}
-			// Rtble extraction
-			if(!subquery_exist) {	// Single ML query
-				rtable_num = list_length(query->rtable);
-				rtable_id = (int*)malloc(sizeof(int)*rtable_num);
-				rtable_relid = (int*)malloc(sizeof(int)*rtable_num);
-				rtable_name = (char**)malloc(sizeof(char*)*rtable_num);
-				rtable_colnum = (int*)malloc(sizeof(unsigned int)*rtable_num);
-				rtable_colsel = (unsigned long long int*)malloc(sizeof(unsigned long long int)*rtable_num);
-				rtable_colname = (char***)malloc(sizeof(char**)*rtable_num);
-				hw_rtable_extract(query, rtable_id, rtable_relid, rtable_name, rtable_colnum, rtable_colsel, rtable_colname);
-			}
-			else {					// Mixed ML query with aggregation
-				rtable_num = list_length(subquery->rtable);
-				rtable_id = (int*)malloc(sizeof(int)*rtable_num);
-				rtable_relid = (int*)malloc(sizeof(int)*rtable_num);
-				rtable_name = (char**)malloc(sizeof(char*)*rtable_num);
-				rtable_colnum = (int*)malloc(sizeof(int)*rtable_num);
-				rtable_colsel = (unsigned long long int*)malloc(sizeof(unsigned long long int)*rtable_num);
-				rtable_colname = (char***)malloc(sizeof(char**)*rtable_num);
-				hw_rtable_extract(subquery, rtable_id, rtable_relid, rtable_name, rtable_colnum, rtable_colsel, rtable_colname);
-			}
+			query_num++;
+			rtable_num = list_length(query->rtable);
+			rtable_id = (int*)malloc(sizeof(int) * rtable_num);
+			rtable_relid = (int*)malloc(sizeof(int) * rtable_num);
+			rtable_name = (char**)malloc(sizeof(char *) * rtable_num);
+			rtable_colnum = (int*)malloc(sizeof(int) * rtable_num);
+			rtable_colsel = (unsigned long long int *)malloc(sizeof(unsigned long long int) * rtable_num);
+			rtable_colname = (char***)malloc(sizeof(char**) * rtable_num);
+			table_size = (int*)malloc(sizeof(int) * rtable_num);
+			hw_rtable_extract(query, rtable_id, rtable_relid, rtable_name, rtable_colnum, rtable_colsel, rtable_colname, table_size);
 		}
+		
 		printf("hw stack debug - data check\n");
 		for (int k = 0 ; k < rtable_num ; k++){
-			printf("-- %dth --\nrtable_id: %d\nrtable_relid: %d\nrtable_name: %s\nrtable_colnum: %d\nrtable_colsel: %lld\n",
-												k, *(rtable_id + k), *(rtable_relid + k), *(rtable_name + k), *(rtable_colnum + k), *(rtable_colsel + k));
+			printf("-- %dth --\nrtable_id: %d\nrtable_relid: %d\nrtable_name: %s\nrtable_colnum: %d\nrtable_colsel: %lld\ntable_size: %d\n",
+												k, *(rtable_id + k), *(rtable_relid + k), *(rtable_name + k), *(rtable_colnum + k), *(rtable_colsel + k),
+												*(table_size + k));
 		}
-
-		/*
-		if (now_op_num == TREE_TR){
-			printf("hw stack debug - tree train phase\n");
-			//tree_table_query_creator(*rtable_relid);
-		}
-		*/
-
-		hw_reconstructor(hw_operation, rtable_num, rtable_id, rtable_relid, rtable_name, rtable_colnum, rtable_colsel, rtable_colname);
-
-		/*----------------------------------------------------
-		 *	HW Predictor
-		 *	Determine whether offload or not
-		 *  Rule-based or Cost-based
-		 *--------------------------------------------------*/
 		
-		bool hw_offload = 0;
+		// get additional information for specific cases
+		if ((op_info.hw_operation == LINREGR) | (op_info.hw_operation == LOGREGR)){
+			int model_col_num;
+			for (int now_model_num = 0 ; now_model_num < rtable_colnum[1] ; now_model_num++){
+				if (hw_strcmp(op_info.model_col_name, rtable_colname[1][now_model_num])){
+					model_col_num = now_model_num;
+					break;
+				}
+			}
+			printf("model col num: %d\n", model_col_num);
+			
+			int* data_col_num = (int *)malloc(sizeof(int) * op_info.data_col_len);
+			for (int data_num = 0 ; data_num < op_info.data_col_len ; data_num++){
+				char* now_col_name = op_info.data_col_name[data_num];
+				if (hw_strcmp(now_col_name, (char*)"1")){
+					data_col_num[data_num] = -1; // bias
+				} else{
+					for (int now_col_num = 0 ; now_col_num < rtable_colnum[0] ; now_col_num++){
+						if (hw_strcmp(now_col_name, rtable_colname[0][now_col_num])){
+							data_col_num[data_num] = now_col_num;
+							continue;
+						}
+					}
+				}
+			}
+			printf("(LINREGR/LOGREGR)data col nums: ");
+			for (int i = 0 ; i < op_info.data_col_len ; i++){
+				printf("[%d] ", data_col_num[i]);
+			}
+			printf("\n");
+			free(data_col_num);
+		} else if ((op_info.hw_operation == SVM) | (op_info.hw_operation == MLP)){
+			int data_col_num;
+			for (int now_data_num = 0 ; now_data_num < rtable_colnum[0] ; now_data_num++){
+				if (hw_strcmp(op_info.id_col_name, rtable_colname[0][now_data_num])){
+					data_col_num = now_data_num;
+					break;
+				}
+			}
+			printf("(SVM/MLP)model col num: %d\n", data_col_num);
+		} else{
+			printf("operation is not supported in this hw\n");
+			free_operation_info(&op_info);
+			return;
+		}
 
-		/*----------------------------------------------------
-		 *	HW Compiler
-		 *	Generate compressed meta-data for hardware
-		 *--------------------------------------------------*/
+		// get additional information for filtering if needed
+		if (op_info.filter_flag){
+			printf("filter phase\n");
+			if (hw_strcmp(op_info.filter_table_name, op_info.data_table_name)){ // data table = filter table
+				int filter_col_num;
+				for (int now_filter_col = 0 ; now_filter_col < rtable_colnum[0] ; now_filter_col++){
+					if (hw_strcmp(op_info.filter_col_name, rtable_colname[0][now_filter_col])){
+						filter_col_num = now_filter_col;
+						break;
+					}
+				}
+				printf("filter col num: %d\n", filter_col_num);
+			} else{
+				printf("indefined filter operation");
+			}
+		}
+		
+		// get additional information for aggregation if needed
+		if (op_info.aggr_flag){
+			printf("aggr phase\n");
+		}
 
+		free_operation_info(&op_info);
+		free(rtable_id);
+		free(rtable_relid);
+		for (int free_rtable_name = 0 ; free_rtable_name < rtable_num ; free_rtable_name++){
+			free(rtable_name[free_rtable_name]);
+		}
+		free(rtable_name);
+		free(rtable_colnum);
+		free(rtable_colsel);
+		for (int query_cnt = 0 ; query_cnt < query_num ; query_cnt++){
+			for (int free_rtable_colsel = 0 ; free_rtable_colsel < rtable_num ; free_rtable_colsel++){
+				free(rtable_colname[query_cnt][free_rtable_colsel]);
+			}
+			free(rtable_colname[query_cnt]);
+		}
+		free(rtable_colname);
+		return;
+	} else{ // hw does not support operation
+		free_operation_info(&op_info);
+		return;
 	}
-
-	/*--------------------------------------------------------
-	 *	Free dynamic allocation
-	 *------------------------------------------------------*/
-	free(query_str);
-	free(word_array);
 }
 
 /* ----------------------------------------------------------------
