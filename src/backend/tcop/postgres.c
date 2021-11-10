@@ -279,6 +279,60 @@ static char *tree_table_name;
 #define SMALLER				4
 #define SMALLERSAME			5
 
+/*--------------------------------------------------------
+ *	#defines for adaptive range
+ *------------------------------------------------------*/
+
+#define MATRIX_VALUE_PTR(pA, row, col) (&(((pA)->pContents)[(row * (pA)->cols) + col]))
+#define	ABS(x) (((x) < 0) ? -(x) : (x))
+#define DATASIZE 50
+#define EXEC_ORDER 3
+
+#define USE_ADAPTIVE_RANGE 0
+
+typedef struct matrix_s{
+	int	rows;
+	int	cols;
+	double *pContents;
+} matrix_t;
+
+static matrix_t *createMatrix(int rows, int cols);
+static void destroyMatrix(matrix_t *pMat);
+static matrix_t *createTranspose(matrix_t *pMat);
+static matrix_t *createProduct(matrix_t *pLeft, matrix_t *pRight);
+
+static int data1_len;
+static int data2_len;
+static int data3_len;
+
+static double* data_num1;
+static double* data_num2;
+static double* data_num3;
+
+static double* q1_exec_time1;
+static double* q1_exec_time2;
+static double* q1_exec_time3;
+
+static double* exec_coef1;
+static double* exec_coef2;
+static double* exec_coef3;
+
+static bool inited = false;
+
+static bool start_time_recorded = false;
+static clock_t query_start_time;
+static clock_t query_end_time;
+
+static bool num_rows_recorded = false;
+static uint64 num_rows;
+
+// wrapper function
+void set_num_rows(uint64 input)
+{
+	num_rows_recorded = true;
+	num_rows = input;
+}
+
  /*--------------------------------------------------------
   *	Structure for HW-aware SW stack
   *------------------------------------------------------*/
@@ -327,11 +381,13 @@ struct operation_info{
 	char* data_table_name;
 	char* model_table_name; 
 	// if linregr or logregr
-	char* model_col_name;
-	int data_col_len; // can also get from len(coef)
+	int model_col_len; // can also get from len (coef)
+	char** model_col_name;
+	int data_col_len; // can also get from len (coef)
 	char** data_col_name; 
-	// if svm or mlp
-	char* id_col_name;
+	// if svm or mlp or tree
+	char* id_col_name; // not for tree
+	char* output_table_name;
 	// filtering info
 	bool filter_flag;
 	int filter_operation;
@@ -440,11 +496,13 @@ init_operation_info(struct operation_info *info){
 	info->data_table_name = NULL;
 	info->model_table_name = NULL;
 	// if linregr or logregr
+	info->model_col_len = 0;
 	info->model_col_name = NULL;
 	info->data_col_len = 0;
 	info->data_col_name = NULL;
 	// if svm or mlp
-	info->id_col_name = NULL;
+	info->id_col_name  = NULL; 
+	info->output_table_name = NULL;
 	// filtering info
 	info->filter_flag = false;
 	info->filter_operation = NONE;
@@ -468,10 +526,11 @@ free_operation_info(struct operation_info *info){
 			free(info->model_table_name);
 		}
 
-		
 		if ((info->hw_operation == LINREGR) | (info->hw_operation == LOGREGR)){
-			if (info->model_col_name){
-				free(info->model_col_name);
+			for (int i = 0 ; i < info->model_col_len ; i++){
+				if (info->model_col_name){
+					free(info->model_col_name[i]);
+				}
 			}
 			for (int i = 0 ; i < info->data_col_len ; i++){
 				if (info->data_col_name[i]){
@@ -481,11 +540,16 @@ free_operation_info(struct operation_info *info){
 			if (info->data_col_name){
 				free(info->data_col_name);
 			}
-		} else if ((info->hw_operation == SVM) | (info->hw_operation == MLP)){
-			if (info->id_col_name){
-				free(info->id_col_name);
+		} else if ((info->hw_operation == SVM) | (info->hw_operation == MLP) | (info->hw_operation == TREE)){
+			if (info->output_table_name){
+				free(info->output_table_name);
 			}
-		}
+			if ((info->hw_operation == SVM) | (info->hw_operation == MLP)){
+				if (info->id_col_name){
+					free(info->id_col_name);
+				}
+			}
+		} 
 		
 		if (info->filter_flag){
 			if (info->filter_table_name){
@@ -505,7 +569,6 @@ free_operation_info(struct operation_info *info){
 			}
 		}
 	}
-
 }
 
 static void
@@ -527,6 +590,7 @@ extract_operation_info(char** word_array, int word_size, struct operation_info *
 			case SELECT:{
 				//printf("cluster: SELECT\n");
 				int query_check = 0;
+				//printf("%s\n", word_array[i + 1]);
 				query_check = hw_ophashmap(word_array[i + 1]);
 				//printf("select op check - %d\n", query_check);
 				if (query_check != NONE){ // madlib operation
@@ -535,12 +599,42 @@ extract_operation_info(char** word_array, int word_size, struct operation_info *
 					//printf("operation: %d\n", info->hw_operation);
 					if ((info->hw_operation == LINREGR) | (info->hw_operation == LOGREGR)){
 						//printf("--regression--\n");
-						info->model_col_name = (char *)malloc(sizeof(char) * MAX_NAME_LEN);
-						strcpy(info->model_col_name, word_array[i + 2]);
+						//info->model_col_name = (char *)malloc(sizeof(char) * MAX_NAME_LEN);
+						//strcpy(info->model_col_name, word_array[i + 2]);
 						//printf("model_col_name: %s\n", info->model_col_name);
-						if (hw_strcmp(word_array[i + 3], (char*)"ARRAY")){
-							int arr_len = 0;
-							while (!hw_strcmp(word_array[i + 4 + arr_len], (char*)"FROM")){
+						int arr_len = 0;
+						i += 2;
+						if (hw_strcmp(word_array[i], (char*)"ARRAY")){
+							arr_len = 0;
+							while ((!hw_strcmp(word_array[i + 1 + arr_len], (char*)"FROM")) & 
+								   (!hw_strcmp(word_array[i + 1 + arr_len], (char*)"ARRAY"))){
+								arr_len++;
+							}
+							//printf("arr_len: %d\narr: ", arr_len);
+							info->model_col_len = arr_len;
+							info->model_col_name = (char **)malloc(sizeof(char *) * arr_len);
+							for (int k = 0 ; k < arr_len ; k++){
+								info->model_col_name[k] = (char *)malloc(sizeof(char) * MAX_NAME_LEN);
+								strcpy(info->model_col_name[k], word_array[i + 1 + k]);
+								//printf("[%s] ", info->data_col_name[k]);
+							}
+							//printf("\n");
+							i += (1 + arr_len);
+						} else if (hw_strcmp(word_array[i], (char*)"coef")){
+							//printf("support? %d\n", info->hw_support);
+							//printf("come----------------------------------------\n");
+							arr_len = 1;
+							info->model_col_len = arr_len;
+							info->model_col_name = (char **)malloc(sizeof(char *) * arr_len);
+							info->model_col_name[0] = (char *)malloc(sizeof(char) * MAX_NAME_LEN);
+							strcpy(info->model_col_name[0], word_array[i]);
+							i += arr_len;
+						}						
+						
+						if (hw_strcmp(word_array[i], (char*)"ARRAY")){
+							arr_len = 0;
+							while ((!hw_strcmp(word_array[i + 1 + arr_len], (char*)"FROM")) &
+								   (!hw_strcmp(word_array[i + 1 + arr_len], (char*)"ARRAY"))){
 								arr_len++;
 							}
 							//printf("arr_len: %d\narr: ", arr_len);
@@ -548,13 +642,20 @@ extract_operation_info(char** word_array, int word_size, struct operation_info *
 							info->data_col_name = (char **)malloc(sizeof(char *) * arr_len);
 							for (int k = 0 ; k < arr_len ; k++){
 								info->data_col_name[k] = (char *)malloc(sizeof(char) * MAX_NAME_LEN);
-								strcpy(info->data_col_name[k], word_array[i + 4 + k]);
+								strcpy(info->data_col_name[k], word_array[i + 1 + k]);
 								//printf("[%s] ", info->data_col_name[k]);
 							}
 							//printf("\n");
-							i += (4 + arr_len);
+							i += (1 + arr_len);
+						} else if (hw_strcmp(word_array[i], (char*)"coef")){
+							arr_len = 1;
+							info->data_col_len = arr_len;
+							info->data_col_name = (char **)malloc(sizeof(char *) * arr_len);
+							info->data_col_name[0] = (char *)malloc(sizeof(char) * MAX_NAME_LEN);
+							strcpy(info->data_col_name[0], word_array[i]);
+							i += arr_len;
 						}
-					} else if ((info->hw_operation == SVM) | (info->hw_operation == MLP)){
+					} else if ((info->hw_operation == SVM) | (info->hw_operation == MLP) | (info->hw_operation == TREE)){
 						//printf("--SVM/MLP--\n");
 						info->model_table_name = (char *)malloc(sizeof(char) * MAX_NAME_LEN);
 						strcpy(info->model_table_name, word_array[i + 2]);
@@ -562,9 +663,16 @@ extract_operation_info(char** word_array, int word_size, struct operation_info *
 						info->data_table_name = (char *)malloc(sizeof(char) * MAX_NAME_LEN);
 						strcpy(info->data_table_name, word_array[i + 3]);
 						//printf("data_table_name: %s\n", info->data_table_name);
-						info->id_col_name = (char *)malloc(sizeof(char) * MAX_NAME_LEN);
-						strcpy(info->id_col_name, word_array[i + 4]);
-						//printf("id_col_name: %s\n", info->id_col_name);
+						if ((info->hw_operation == SVM) | (info->hw_operation == MLP)){
+							info->id_col_name = (char *)malloc(sizeof(char) * MAX_NAME_LEN);
+							strcpy(info->id_col_name, word_array[i + 4]);
+							//printf("id_col_name: %s\n", info->id_col_name);
+							info->output_table_name = (char *)malloc(sizeof(char) * MAX_NAME_LEN);
+							strcpy(info->output_table_name, word_array[i + 5]);	
+						} else{
+							info->output_table_name = (char *)malloc(sizeof(char) * MAX_NAME_LEN);
+							strcpy(info->output_table_name, word_array[i + 4]);							
+						}
 						i += 6;
 						if (info->hw_operation == MLP){
 							i += 1;
@@ -701,16 +809,23 @@ void printf_op_info(struct operation_info info){
 		printf("model_table_name: %s\n\t", info.model_table_name);
 		
 		if ((info.hw_operation == LINREGR) | (info.hw_operation == LOGREGR)){
-			printf("model_col_name: %s\n\t", info.model_col_name);
+			printf("model_col_len: %d\n\t", info.model_col_len);
+			printf("model_col_name: ");
+			for (int i = 0 ; i < info.model_col_len ; i++){
+				printf("[%s] ", info.model_col_name[i]);
+			}
+			printf("\n\t");
 			printf("data_col_len: %d\n\t", info.data_col_len);
 			printf("data_col_name: ");
 			for (int i = 0 ; i < info.data_col_len ; i++){
 				printf("[%s] ", info.data_col_name[i]);
 			}
 			printf("\n\t");
-			printf("model_col_name: %s\n\t", info.model_col_name);
-		} else if ((info.hw_operation == SVM) | (info.hw_operation == MLP)){
-			printf("id_col_name: %s\n\t", "info.id_col_name");
+		} else if ((info.hw_operation == SVM) | (info.hw_operation == MLP) | (info.hw_operation == TREE)){
+			if ((info.hw_operation == SVM) | (info.hw_operation == MLP)){
+				printf("id_col_name: %s\n\t", info.id_col_name);
+			}
+			printf("output_table_name: %s\n\t", info.output_table_name);
 		}
 
 		if (info.filter_flag){
@@ -1541,6 +1656,7 @@ sw_stack_for_hw(const char* query_string, List* querytrees){
 		foreach(data_model_parsetree_item, data_model_parsetree_list) {
 			RawStmt* parsetree_modified = lfirst_node(RawStmt, data_model_parsetree_item);
 			data_model_querytree_list = pg_analyze_and_rewrite(parsetree_modified, data_model_query, NULL, 0, NULL);
+			//printf("-----------------------------------please1... %d\n", ((FetchStmt *)parsetree_modified->stmt)->howMany);
 		}
 		free(data_model_query);
 		
@@ -1578,6 +1694,7 @@ sw_stack_for_hw(const char* query_string, List* querytrees){
 		
 		// get additional information for specific cases
 		if ((op_info.hw_operation == LINREGR) | (op_info.hw_operation == LOGREGR)){
+			/*
 			int model_col_num;
 			for (int now_model_num = 0 ; now_model_num < rtable_colnum[1] ; now_model_num++){
 				if (hw_strcmp(op_info.model_col_name, rtable_colname[1][now_model_num])){
@@ -1586,8 +1703,41 @@ sw_stack_for_hw(const char* query_string, List* querytrees){
 				}
 			}
 			printf("model col num: %d\n", model_col_num);
-			
+			*/
+    		uint32_t mask_base = 0 | 1;
+
+			int* model_col_num = (int *)malloc(sizeof(int) * op_info.model_col_len);
+			uint32_t model_col_num_bit = 0;
+			for (int model_num = 0 ; model_num < op_info.model_col_len ; model_num++){
+				char* now_col_name = op_info.model_col_name[model_num];
+				if (hw_strcmp(now_col_name, (char*)"1")){
+					model_col_num[model_num] = -1; // bias
+				} else{
+					for (int now_col_num = 0 ; now_col_num < rtable_colnum[1] ; now_col_num++){
+						if (hw_strcmp(now_col_name, rtable_colname[1][now_col_num])){
+							model_col_num[model_num] = now_col_num;
+							model_col_num_bit |= (mask_base << (31 - now_col_num));
+							continue;
+						}
+					}
+				}
+			}
+
+			printf("(LINREGR/LOGREGR)model col nums: ");
+			for (int i = 0 ; i < op_info.model_col_len ; i++){
+				printf("[%d] ", model_col_num[i]);
+			}
+			printf("\n");
+			printf("(LINREGR/LOGREGR)model col nums (bitwise): ");	
+			for (int l = 31; l >= 0; --l) {
+				int result = model_col_num_bit >> l & 0x1;
+				printf("%d", result);
+			}
+			printf("\n");
+			free(model_col_num);
+
 			int* data_col_num = (int *)malloc(sizeof(int) * op_info.data_col_len);
+			uint32_t data_col_num_bit = 0;
 			for (int data_num = 0 ; data_num < op_info.data_col_len ; data_num++){
 				char* now_col_name = op_info.data_col_name[data_num];
 				if (hw_strcmp(now_col_name, (char*)"1")){
@@ -1596,27 +1746,39 @@ sw_stack_for_hw(const char* query_string, List* querytrees){
 					for (int now_col_num = 0 ; now_col_num < rtable_colnum[0] ; now_col_num++){
 						if (hw_strcmp(now_col_name, rtable_colname[0][now_col_num])){
 							data_col_num[data_num] = now_col_num;
+							data_col_num_bit |= (mask_base << (31 - now_col_num));
 							continue;
 						}
 					}
 				}
 			}
+
 			printf("(LINREGR/LOGREGR)data col nums: ");
 			for (int i = 0 ; i < op_info.data_col_len ; i++){
 				printf("[%d] ", data_col_num[i]);
 			}
 			printf("\n");
-			free(data_col_num);
-		} else if ((op_info.hw_operation == SVM) | (op_info.hw_operation == MLP)){
-			int data_col_num;
-			for (int now_data_num = 0 ; now_data_num < rtable_colnum[0] ; now_data_num++){
-				if (hw_strcmp(op_info.id_col_name, rtable_colname[0][now_data_num])){
-					data_col_num = now_data_num;
-					break;
-				}
+			printf("(LINREGR/LOGREGR)data col nums (bitwise): ");	
+			for (int l = 31; l >= 0; --l) {
+				int result = data_col_num_bit >> l & 0x1;
+				printf("%d", result);
 			}
-			printf("(SVM/MLP)model col num: %d\n", data_col_num);
-		} else{
+			printf("\n");
+			free(data_col_num);
+
+		} else if ((op_info.hw_operation == SVM) | (op_info.hw_operation == MLP) | (op_info.hw_operation == TREE)){
+			if ((op_info.hw_operation == SVM) | (op_info.hw_operation == MLP)){
+				int data_col_num;
+				for (int now_data_num = 0 ; now_data_num < rtable_colnum[0] ; now_data_num++){
+					if (hw_strcmp(op_info.id_col_name, rtable_colname[0][now_data_num])){
+						data_col_num = now_data_num;
+						break;
+					}
+				}
+				printf("(SVM/MLP)model col num: %d\n", data_col_num);
+			}
+
+		} else {
 			printf("operation is not supported in this hw\n");
 			free_operation_info(&op_info);
 			return;
@@ -1638,11 +1800,36 @@ sw_stack_for_hw(const char* query_string, List* querytrees){
 				printf("indefined filter operation");
 			}
 		}
-		
+
 		// get additional information for aggregation if needed
 		if (op_info.aggr_flag){
 			printf("aggr phase\n");
 		}
+
+		// Predictor
+		// Cost approx function
+		// Check for data table 
+		printf("check table size ------------------- %d\n", table_size[0]);
+
+		//double new_data_num = 
+		//double new_exec_time = 
+		
+		/*
+		// cost prediction if needed
+		double new_exec_time_predict;
+		if (new_data_num_predict <= data_num2[0]){
+			new_exec_time_predict = polyval(new_data_num, exec_coef1);
+		} else if (new_data_num_predict <= data_num3[0]){
+			new_exec_time_predict = polyval(new_data_num, exec_coef2);
+		} else{
+			new_exec_time_predict = polyval(new_data_num, exec_coef3);
+		}
+
+		// add to data if needed
+		add_new_data(&data_num1, &data_num2,  &data_num3, &q1_exec_time1, &q1_exec_time2, &q1_exec_time3,
+                 	 &data1_len, &data2_len, &data3_len, &exec_coef1, &exec_coef2,  &exec_coef3,
+                 	new_data_num, new_exec_time);
+		*/
 
 		free_operation_info(&op_info);
 		free(rtable_id);
@@ -1665,6 +1852,904 @@ sw_stack_for_hw(const char* query_string, List* querytrees){
 		free_operation_info(&op_info);
 		return;
 	}
+}
+
+int polyfit(int pointCount, double *xValues, double *yValues, int coefficientCount, double *coefficientResults){
+
+    int rVal = 0;
+    int degree = coefficientCount - 1;
+
+    // Check that the input pointers aren't null.
+    if ((NULL == xValues) || (NULL == yValues) || (NULL == coefficientResults)){
+        return -1;
+    }
+    // Check that pointCount >= coefficientCount.
+    if (pointCount < coefficientCount){
+        return -2;
+    }
+
+    // Make the A matrix:
+    matrix_t *pMatA = createMatrix(pointCount, coefficientCount);
+    if (NULL == pMatA){
+        return -3;
+    }
+    for (int r = 0; r < pointCount; r++){
+        for (int c = 0; c < coefficientCount; c++){
+            *(MATRIX_VALUE_PTR(pMatA, r, c)) = pow((xValues[r]), (double) (degree -c));
+        }
+    }
+
+    // Make the b matrix
+    matrix_t *pMatB = createMatrix(pointCount, 1);
+    if (NULL == pMatB){
+        return -3;
+    }
+
+    for (int r = 0; r < pointCount; r++){
+        *(MATRIX_VALUE_PTR(pMatB, r, 0)) = yValues[r];
+    }
+
+    // Make the transpose of matrix A
+    matrix_t * pMatAT = createTranspose(pMatA);
+    if (NULL == pMatAT){
+        return -3;
+    }
+
+    // Make the product of matrices AT and A:
+    matrix_t *pMatATA = createProduct(pMatAT, pMatA);
+    if (NULL == pMatATA){
+        return -3;
+    }
+
+    // Make the product of matrices AT and b:
+    matrix_t *pMatATB = createProduct(pMatAT, pMatB);
+    if (NULL == pMatATB){
+        return -3;
+    }
+
+    // Now we need to solve the system of linear equations,
+    // (AT)Ax = (AT)b for "x", the coefficients of the polynomial.
+
+    for (int c = 0; c < pMatATA->cols; c++){
+        int pr = c;     // pr is the pivot row.
+        double prVal = *MATRIX_VALUE_PTR(pMatATA, pr, c);
+        // If it's zero, we can't solve the equations.
+        if (prVal == 0.0){
+            // printf( "Unable to solve equations, pr = %d, c = %d.\n", pr, c );
+            rVal = -4;
+            break;
+        }
+        for (int r = 0; r < pMatATA->rows; r++){
+            if (r != pr){
+                double targetRowVal = *MATRIX_VALUE_PTR(pMatATA, r, c);
+                double factor = targetRowVal / prVal;
+                for (int c2 = 0; c2 < pMatATA->cols; c2++){
+                    *MATRIX_VALUE_PTR(pMatATA, r, c2) -=  *MATRIX_VALUE_PTR(pMatATA, pr, c2) * factor; 
+                }
+                *MATRIX_VALUE_PTR(pMatATB, r, 0) -=  *MATRIX_VALUE_PTR(pMatATB, pr, 0) * factor;
+            }
+        }
+    }
+    for (int c = 0; c < pMatATA->cols; c++){
+        int pr = c;
+        // now, pr is the pivot row.
+        double prVal = *MATRIX_VALUE_PTR(pMatATA, pr, c);
+        *MATRIX_VALUE_PTR(pMatATA, pr, c) /= prVal;
+        *MATRIX_VALUE_PTR(pMatATB, pr, 0) /= prVal;
+    }
+
+    for(int i = 0; i < coefficientCount; i++){
+        coefficientResults[i] = *MATRIX_VALUE_PTR(pMatATB, i, 0);
+    }
+
+    destroyMatrix(pMatATB);
+    destroyMatrix(pMatATA);
+    destroyMatrix(pMatAT);
+
+    destroyMatrix(pMatA);
+    destroyMatrix(pMatB);
+
+    return rVal;
+}
+
+double *polyval_multi(double* data_num, double* exec_time, int data_len, double* exec_coef){
+
+    //printf("polyval\n");
+    double *result = (double *)malloc(sizeof(double) * data_len);
+    double partial_result = 0;
+    double now_data = 0; 
+    double partial_mul = 0;
+    for (int i = 0 ; i < data_len ; i++){
+        partial_result = 0;
+        now_data = data_num[i];
+        for (int j = EXEC_ORDER ; j >= 0 ; j--){ // 3 2 1 0
+            partial_mul = 1;
+            for (int k = 0 ; k < j ; k++){
+                partial_mul *= now_data;
+            }
+            partial_result += exec_coef[EXEC_ORDER - j] * partial_mul;
+        }
+        result[i] = partial_result;
+        //printf("%lf\n", partial_result);
+    }
+    return result;
+}
+
+double polyval(double new_data, double* exec_coef){
+    double result = 0;
+    double now_data = 0; 
+    double partial_mul = 0;
+    for (int j = EXEC_ORDER ; j >= 0 ; j--){ // 3 2 1 0
+        partial_mul = 1;
+        for (int k = 0 ; k < j ; k++){
+            partial_mul *= now_data;
+        }
+        result += exec_coef[EXEC_ORDER - j] * partial_mul;
+    }
+    return result;
+}
+
+static matrix_t *createTranspose(matrix_t *pMat){
+    matrix_t *rVal = (matrix_t *) calloc(1, sizeof(matrix_t));
+    rVal->pContents = (double *) calloc( pMat->rows * pMat->cols, sizeof(double));
+    rVal->cols = pMat->rows;
+    rVal->rows = pMat->cols;
+    for (int r = 0; r < rVal->rows; r++){
+        for(int c = 0; c < rVal->cols; c++){
+            *MATRIX_VALUE_PTR(rVal, r, c) = *MATRIX_VALUE_PTR(pMat, c, r);
+        }
+    }
+    return rVal;
+}
+
+static matrix_t *createProduct(matrix_t *pLeft, matrix_t *pRight){
+    matrix_t *rVal = NULL;
+    if((NULL == pLeft) || (NULL == pRight) || (pLeft->cols != pRight->rows)){
+        printf("Illegal parameter passed to createProduct().\n");
+    } else{
+        // Allocate the product matrix.
+        rVal = (matrix_t *) calloc(1, sizeof(matrix_t));
+        rVal->rows = pLeft->rows;
+        rVal->cols = pRight->cols;
+        rVal->pContents = (double *) calloc(rVal->rows * rVal->cols, sizeof(double));
+
+        // Initialize the product matrix contents:
+        // product[i,j] = sum{k = 0 .. (pLeft->cols - 1)} (pLeft[i,k] * pRight[ k, j])
+        for (int i = 0; i < rVal->rows; i++){
+            for (int j = 0; j < rVal->cols; j++){
+                for (int k = 0; k < pLeft->cols; k++){
+                    *MATRIX_VALUE_PTR(rVal, i, j) += (*MATRIX_VALUE_PTR(pLeft, i, k)) * (*MATRIX_VALUE_PTR(pRight, k, j));
+                }
+            }
+        }
+    }      
+    return rVal;
+}
+
+static void destroyMatrix(matrix_t *pMat){
+    if (NULL != pMat){
+        if (NULL != pMat->pContents){
+            free(pMat->pContents);
+        }
+        free(pMat);
+    }
+}
+
+static matrix_t *createMatrix(int rows, int cols){  
+    matrix_t *rVal = (matrix_t *) calloc(1, sizeof(matrix_t));
+    if (NULL != rVal){
+        rVal->rows = rows;
+        rVal->cols = cols;
+        rVal->pContents = (double *) calloc(rows * cols, sizeof(double));
+        if (NULL == rVal->pContents){
+            free(rVal);
+            rVal = NULL;
+        }
+    }
+    return rVal;
+}
+
+void print_data(double* data, int data_len){
+    for (int i = 0 ; i < data_len ; i++){
+        if ((i % 10 == 0) & (i != 0)){
+            printf("\n");
+        }
+        printf("%lf ", data[i]);
+    }
+    printf("\n");
+}
+
+int get_avg_error(double* data_num, double* exec_time, int data_len, double* error, double* error_rate, double* exec_coef, bool first_flag){
+
+    //printf("get_avg_error\n");
+    //print_data(data_num, data_len);
+    //print_data(exec_time, data_len);
+    if (polyfit(data_len, data_num, exec_time, EXEC_ORDER + 1, exec_coef)){
+        printf("Error occured in polyfit\n");
+    }
+    /*
+    for (int i = 0 ; i <= EXEC_ORDER ; i++){
+        printf("%e\n", exec_coef[i]);
+    }
+    */
+    double *assume_result = polyval_multi(data_num, exec_time, data_len, exec_coef);
+    /*
+    for (int i = 0 ; i < data_len ; i++){
+        printf("%lf ", assume_result[i]);
+    }
+    printf("\n");
+    */
+    double partial_error = 0;
+    double total_error = 0;
+    double total_error_rate = 0;
+    for (int j = 0 ; j < data_len ; j++){
+        partial_error = ABS(exec_time[j] - assume_result[j]);
+        if ((!first_flag) & (j == 0)){
+            continue;
+        }
+        total_error += partial_error;
+        total_error_rate += ((partial_error / exec_time[j]) * 100);
+    }
+    *error = total_error / data_len;
+    *error_rate = total_error_rate / data_len;
+    //printf("error: %lf, error_rate: %lf\n", *error, *error_rate);
+    free(assume_result);
+    
+    return 0;
+}
+
+int adjust_range(double* data_num1, double* data_num2, double* exec_time1, double* exec_time2, int* data1_len, int* data2_len,
+                 double** min_left_data_num, double** min_right_data_num, 
+                 double** min_left_exec_time, double** min_right_exec_time, 
+                 double** min_left_coef, double** min_right_coef, bool first_flag){
+    
+    //printf("adjust_range\n");
+    //print_data(data_num1, *data1_len);
+    //print_data(exec_time1, *data1_len);
+
+    int def_data1_len = *data1_len;
+    int def_data2_len = *data2_len;
+
+    if ((def_data1_len < 3) | (def_data2_len < 3)){
+        printf("too small data for range - break");
+    }
+
+    double def_left_error = 0;
+    double *def_left_coef = (double *)malloc(sizeof(double) * (EXEC_ORDER + 1));
+    double def_left_error_rate = 0;
+    double def_right_error = 0;
+    double *def_right_coef = (double *)malloc(sizeof(double) * (EXEC_ORDER + 1));
+    double def_right_error_rate = 0;
+
+    if (get_avg_error(data_num1, exec_time1, def_data1_len, &def_left_error, &def_left_error_rate, def_left_coef, first_flag)){
+        printf("Error occured in get_avg_error\n");
+    }
+    //printf("[left] error: %lf, error_rate: %lf\n", def_left_error, def_left_error_rate);
+    if (get_avg_error(data_num2, exec_time2, def_data2_len, &def_right_error, &def_right_error_rate, def_right_coef, false)){
+        printf("Error occured in get_avg_error\n");
+    }
+    //printf("[right] error: %lf, error_rate: %lf\n", def_right_error, def_right_error_rate);
+    printf("[left] error_rate: %lf [right] error_rate: %lf\n", def_left_error_rate, def_right_error_rate);
+
+    //print_data(data_num1, def_data1_len);
+    //print_data(data_num2, def_data2_len);
+
+    double left_error;
+    double left_error_rate;
+    double right_error;
+    double right_error_rate;
+
+    // phase 1 (left moving phase)
+    printf("Phase 1\n");
+    double min_left_error_1 = def_left_error;
+    double min_right_error_1 = def_right_error;
+    double min_left_error_rate_1 = def_left_error_rate;
+    double min_right_error_rate_1 = def_right_error_rate;    
+    
+    double *min_left_coef_1 = (double *)malloc(sizeof(double) * (EXEC_ORDER + 1));
+    double *min_right_coef_1 = (double *)malloc(sizeof(double) * (EXEC_ORDER + 1));
+    for (int coef_i = 0 ; coef_i < EXEC_ORDER + 1 ; coef_i++){
+        min_left_coef_1[coef_i] = def_left_coef[coef_i];
+        min_right_coef_1[coef_i] = def_right_coef[coef_i];
+    }
+    int min_left_len_1 = def_data1_len;
+    int min_right_len_1 = def_data2_len;
+
+    int total_len = def_data1_len + def_data2_len;
+    double *min_left_data_num_1 = (double *)malloc(sizeof(double) * total_len);
+    double *min_right_data_num_1 = (double *)malloc(sizeof(double) * total_len);
+    double *min_left_exec_time_1 = (double *)malloc(sizeof(double) * total_len);
+    double *min_right_exec_time_1 = (double *)malloc(sizeof(double) * total_len);
+
+    for (int left_i = 0 ; left_i < def_data1_len ; left_i++){
+        min_left_data_num_1[left_i] = data_num1[left_i];
+        min_left_exec_time_1[left_i] = exec_time1[left_i];
+    }
+    for (int right_i = 0 ; right_i < def_data2_len ; right_i++){
+        min_right_data_num_1[right_i] = data_num2[right_i];
+        min_right_exec_time_1[right_i] = exec_time2[right_i];
+    }
+
+    int left_len_1 = def_data1_len;
+    int right_len_1 = def_data2_len;
+
+    for (int phase1_rec = 0 ; phase1_rec < def_data2_len ; phase1_rec++){
+        min_left_data_num_1[left_len_1] = min_right_data_num_1[1];
+        min_left_exec_time_1[left_len_1] = min_right_exec_time_1[1];
+        left_len_1 += 1;
+        for (int right_delete = 0 ; right_delete < (right_len_1 - 1) ; right_delete++){
+            min_right_data_num_1[right_delete] = min_right_data_num_1[right_delete + 1];
+            min_right_exec_time_1[right_delete] = min_right_exec_time_1[right_delete + 1];
+        }
+        min_right_data_num_1[(right_len_1 - 1)] = 0;
+        min_right_exec_time_1[(right_len_1 - 1)] = 0;
+        right_len_1 -= 1;
+
+        //print_data(min_left_data_num_1, left_len_1);
+        //print_data(min_right_data_num_1, right_len_1);
+
+        double *left_coef_1 = (double *)malloc(sizeof(double) * (EXEC_ORDER + 1));
+        if (get_avg_error(min_left_data_num_1, min_left_exec_time_1, left_len_1, &left_error, &left_error_rate, left_coef_1, first_flag)){
+            printf("Error occured in get_avg_error\n");
+        }
+        double *right_coef_1 = (double *)malloc(sizeof(double) * (EXEC_ORDER + 1));
+        if (get_avg_error(min_right_data_num_1, min_right_exec_time_1, right_len_1, &right_error, &right_error_rate, right_coef_1, false)){
+            printf("Error occured in get_avg_error\n");
+        }     
+        //printf("[left] error_rate: %lf [right] error_rate: %lf\n", left_error_rate, right_error_rate);
+
+        if ((left_error_rate < min_left_error_rate_1) & (right_error_rate < min_right_error_rate_1)){
+            printf("case 1\n");
+            printf("updated to %lf, %lf\n", left_error_rate, right_error_rate);
+            min_left_error_1 = left_error;
+            min_right_error_1 = right_error;
+            min_left_error_rate_1 = left_error_rate;
+            min_right_error_rate_1 = right_error_rate;
+            free(min_left_coef_1);
+            free(min_right_coef_1);
+            min_left_coef_1 = left_coef_1;
+            min_right_coef_1 = right_coef_1;
+            min_left_len_1 = left_len_1;
+            min_right_len_1 = right_len_1;
+        } else if ((left_error_rate > min_left_error_rate_1) & (right_error_rate > min_right_error_rate_1)){
+            printf("case 2\n");
+            printf("break\n");
+            // Roll back 
+            for (int right_delete = right_len_1 ; right_delete >= 1 ; right_delete--){
+                min_right_data_num_1[right_delete] = min_right_data_num_1[right_delete - 1];
+                min_right_exec_time_1[right_delete] = min_right_exec_time_1[right_delete - 1];
+            }
+            min_right_data_num_1[0] = min_left_data_num_1[(left_len_1 - 2)];
+            min_right_exec_time_1[0] = min_left_exec_time_1[(left_len_1 - 2)];
+            right_len_1 += 1;
+            min_left_data_num_1[(left_len_1 - 1)] = 0;
+            min_left_exec_time_1[(left_len_1 - 1)] = 0;
+            left_len_1 -= 1;
+            free(left_coef_1);
+            free(right_coef_1);
+            break;
+        } else{
+            if ((left_error_rate < min_left_error_rate_1) & (right_error_rate > min_right_error_rate_1)){
+                printf("case 3_1\n");
+                double left_improved = min_left_error_rate_1 - left_error_rate;
+                double right_worsed = right_error_rate - min_right_error_rate_1;
+                if (left_improved > right_worsed){
+                    printf("updated to %lf, %lf\n", left_error_rate, right_error_rate);
+                    min_left_error_1 = left_error;
+                    min_right_error_1 = right_error;
+                    min_left_error_rate_1 = left_error_rate;
+                    min_right_error_rate_1 = right_error_rate;
+                    free(min_left_coef_1);
+                    free(min_right_coef_1);
+                    min_left_coef_1 = left_coef_1;
+                    min_right_coef_1 = right_coef_1;
+                    min_left_len_1 = left_len_1;
+                    min_right_len_1 = right_len_1;
+                } else{
+                    printf("break\n");
+                    // Roll back 
+                    for (int right_delete = right_len_1 ; right_delete >= 1 ; right_delete--){
+                        min_right_data_num_1[right_delete] = min_right_data_num_1[right_delete - 1];
+                        min_right_exec_time_1[right_delete] = min_right_exec_time_1[right_delete - 1];
+                    }
+                    min_right_data_num_1[0] = min_left_data_num_1[(left_len_1 - 2)];
+                    min_right_exec_time_1[0] = min_left_exec_time_1[(left_len_1 - 2)];
+                    right_len_1 += 1;
+                    min_left_data_num_1[(left_len_1 - 1)] = 0;
+                    min_left_exec_time_1[(left_len_1 - 1)] = 0;
+                    left_len_1 -= 1;
+                    free(left_coef_1);
+                    free(right_coef_1);
+                    break;
+                }
+            } else{
+                printf("case 3_2\n");
+                double left_worsed = left_error_rate - min_left_error_rate_1;
+                double right_improved = min_right_error_rate_1 - right_error_rate;
+                if (right_improved > left_worsed){
+                    printf("updated to %lf, %lf\n", left_error_rate, right_error_rate);
+                    min_left_error_1 = left_error;
+                    min_right_error_1 = right_error;
+                    min_left_error_rate_1 = left_error_rate;
+                    min_right_error_rate_1 = right_error_rate;
+                    free(min_left_coef_1);
+                    free(min_right_coef_1);
+                    min_left_coef_1 = left_coef_1;
+                    min_right_coef_1 = right_coef_1;
+                    min_left_len_1 = left_len_1;
+                    min_right_len_1 = right_len_1;
+                } else{
+                    printf("break\n");
+                    // Roll back 
+                    for (int right_delete = right_len_1 ; right_delete >= 1 ; right_delete--){
+                        min_right_data_num_1[right_delete] = min_right_data_num_1[right_delete - 1];
+                        min_right_exec_time_1[right_delete] = min_right_exec_time_1[right_delete - 1];
+                    }
+                    min_right_data_num_1[0] = min_left_data_num_1[(left_len_1 - 2)];
+                    min_right_exec_time_1[0] = min_left_exec_time_1[(left_len_1 - 2)];
+                    right_len_1 += 1;
+                    min_left_data_num_1[(left_len_1 - 1)] = 0;
+                    min_left_exec_time_1[(left_len_1 - 1)] = 0;
+                    left_len_1 -= 1;
+                    free(left_coef_1);
+                    free(right_coef_1);
+                    break;
+                } 
+            }
+        }   
+        if ((min_left_error_rate_1 < 5) | (min_right_error_rate_1 < 5)){
+            printf("small enough - break\n");
+            // Roll back 
+            for (int right_delete = right_len_1 ; right_delete >= 1 ; right_delete--){
+                min_right_data_num_1[right_delete] = min_right_data_num_1[right_delete - 1];
+                min_right_exec_time_1[right_delete] = min_right_exec_time_1[right_delete - 1];
+            }
+            min_right_data_num_1[0] = min_left_data_num_1[(left_len_1 - 2)];
+            min_right_exec_time_1[0] = min_left_exec_time_1[(left_len_1 - 2)];
+            right_len_1 += 1;
+            min_left_data_num_1[(left_len_1 - 1)] = 0;
+            min_left_exec_time_1[(left_len_1 - 1)] = 0;
+            left_len_1 -= 1;
+            free(left_coef_1);
+            free(right_coef_1);
+            break;
+        }
+        if ((min_left_len_1 < 4) | (min_right_len_1 < 4)){
+            printf("too small data for range - break\n");
+            // Roll back 
+            for (int right_delete = right_len_1 ; right_delete >= 1 ; right_delete--){
+                min_right_data_num_1[right_delete] = min_right_data_num_1[right_delete - 1];
+                min_right_exec_time_1[right_delete] = min_right_exec_time_1[right_delete - 1];
+            }
+            min_right_data_num_1[0] = min_left_data_num_1[(left_len_1 - 2)];
+            min_right_exec_time_1[0] = min_left_exec_time_1[(left_len_1 - 2)];
+            right_len_1 += 1;
+            min_left_data_num_1[(left_len_1 - 1)] = 0;
+            min_left_exec_time_1[(left_len_1 - 1)] = 0;
+            left_len_1 -= 1;
+            free(left_coef_1);
+            free(right_coef_1);
+            break;
+        }
+    }
+    printf("phase 1 result: %lf, %lf / boundary: %lf\n", min_left_error_rate_1, min_right_error_rate_1, min_right_data_num_1[0]);
+    /*
+    for (int x = 0 ; x < EXEC_ORDER + 1 ; x++){
+        printf("%e ", min_left_coef_1[x]);
+    }
+    printf("\n");
+    for (int y = 0 ; y < EXEC_ORDER + 1 ; y++){
+        printf("%e ", min_right_coef_1[y]);
+    }
+    printf("\n");
+    */
+    //print_data(min_left_data_num_1, min_left_len_1);
+    //print_data(min_right_data_num_1, min_right_len_1);
+
+    // phase 1 (right moving phase)
+    printf("Phase 2\n");
+    double min_left_error_2 = def_left_error;
+    double min_right_error_2 = def_right_error;
+    double min_left_error_rate_2 = def_left_error_rate;
+    double min_right_error_rate_2 = def_right_error_rate;    
+    
+    double *min_left_coef_2 = (double *)malloc(sizeof(double) * (EXEC_ORDER + 1));
+    double *min_right_coef_2 = (double *)malloc(sizeof(double) * (EXEC_ORDER + 1));
+    for (int coef_i = 0 ; coef_i < EXEC_ORDER + 1 ; coef_i++){
+        min_left_coef_2[coef_i] = def_left_coef[coef_i];
+        min_right_coef_2[coef_i] = def_right_coef[coef_i];
+    }
+    free(def_left_coef);
+    free(def_right_coef);
+    int min_left_len_2 = def_data1_len;
+    int min_right_len_2 = def_data2_len;
+
+    double *min_left_data_num_2 = (double *)malloc(sizeof(double) * total_len);
+    double *min_right_data_num_2 = (double *)malloc(sizeof(double) * total_len);
+    double *min_left_exec_time_2 = (double *)malloc(sizeof(double) * total_len);
+    double *min_right_exec_time_2 = (double *)malloc(sizeof(double) * total_len);
+
+    for (int left_i = 0 ; left_i < def_data1_len ; left_i++){
+        min_left_data_num_2[left_i] = data_num1[left_i];
+        min_left_exec_time_2[left_i] = exec_time1[left_i];
+    }
+    for (int right_i = 0 ; right_i < def_data2_len ; right_i++){
+        min_right_data_num_2[right_i] = data_num2[right_i];
+        min_right_exec_time_2[right_i] = exec_time2[right_i];
+    }
+
+    int left_len_2 = def_data1_len;
+    int right_len_2 = def_data2_len;
+
+    for (int phase2_rec = 0 ; phase2_rec < def_data1_len ; phase2_rec++){
+        for (int right_delete = right_len_2 ; right_delete >= 1 ; right_delete--){
+            min_right_data_num_2[right_delete] = min_right_data_num_2[right_delete - 1];
+            min_right_exec_time_2[right_delete] = min_right_exec_time_2[right_delete - 1];
+        }
+        min_right_data_num_2[0] = min_left_data_num_2[(left_len_2 - 2)];
+        min_right_exec_time_2[0] = min_left_exec_time_2[(left_len_2 - 2)];
+        right_len_2 += 1;
+        min_left_data_num_2[(left_len_2 - 1)] = 0;
+        min_left_exec_time_2[(left_len_2 - 1)] = 0;
+        left_len_2 -= 1;
+
+        //print_data(min_left_data_num_2, left_len_2);
+        //print_data(min_right_data_num_2, right_len_2);
+
+        double *left_coef_2 = (double *)malloc(sizeof(double) * (EXEC_ORDER + 1));
+        if (get_avg_error(min_left_data_num_2, min_left_exec_time_2, left_len_2, &left_error, &left_error_rate, left_coef_2, first_flag)){
+            printf("Error occured in get_avg_error\n");
+        }
+        double *right_coef_2 = (double *)malloc(sizeof(double) * (EXEC_ORDER + 1));
+        if (get_avg_error(min_right_data_num_2, min_right_exec_time_2, right_len_2, &right_error, &right_error_rate, right_coef_2, false)){
+            printf("Error occured in get_avg_error\n");
+        }     
+        //printf("[left] error_rate: %lf [right] error_rate: %lf\n", left_error_rate, right_error_rate);
+
+        if ((left_error_rate < min_left_error_rate_2) & (right_error_rate < min_right_error_rate_2)){
+            printf("case 1\n");
+            printf("updated to %lf, %lf\n", left_error_rate, right_error_rate);
+            min_left_error_2 = left_error;
+            min_right_error_2 = right_error;
+            min_left_error_rate_2 = left_error_rate;
+            min_right_error_rate_2 = right_error_rate;
+            free(min_left_coef_2);
+            free(min_right_coef_2);
+            min_left_coef_2 = left_coef_2;
+            min_right_coef_2 = right_coef_2;
+            min_left_len_2 = left_len_2;
+            min_right_len_2 = right_len_2;
+        } else if ((left_error_rate > min_left_error_rate_2) & (right_error_rate > min_right_error_rate_2)){
+            printf("case 2\n");
+            printf("break\n");
+            // Roll back 
+            min_left_data_num_2[left_len_2] = min_right_data_num_2[1];
+            min_left_exec_time_2[left_len_2] = min_right_exec_time_2[1];
+            left_len_2 += 1;
+            for (int right_delete = 0 ; right_delete < (right_len_2 - 1) ; right_delete++){
+                min_right_data_num_2[right_delete] = min_right_data_num_2[right_delete + 1];
+                min_right_exec_time_2[right_delete] = min_right_exec_time_2[right_delete + 1];
+            }
+            min_right_data_num_2[(right_len_2 - 1)] = 0;
+            min_right_exec_time_2[(right_len_2 - 1)] = 0;
+            right_len_2 -= 1;
+            free(left_coef_2);
+            free(right_coef_2);
+            break;
+        } else{
+            if ((left_error_rate < min_left_error_rate_2) & (right_error_rate > min_right_error_rate_2)){
+                printf("case 3_1\n");
+                double left_improved = min_left_error_rate_2 - left_error_rate;
+                double right_worsed = right_error_rate - min_right_error_rate_2;
+                if (left_improved > right_worsed){
+                    printf("updated to %lf, %lf\n", left_error_rate, right_error_rate);
+                    min_left_error_2 = left_error;
+                    min_right_error_2 = right_error;
+                    min_left_error_rate_2 = left_error_rate;
+                    min_right_error_rate_2 = right_error_rate;
+                    free(min_left_coef_2);
+                    free(min_right_coef_2);
+                    min_left_coef_2 = left_coef_2;
+                    min_right_coef_2 = right_coef_2;
+                    min_left_len_2 = left_len_2;
+                    min_right_len_2 = right_len_2;
+                } else{
+                    printf("break\n");
+                    // Roll back 
+                    min_left_data_num_2[left_len_2] = min_right_data_num_2[1];
+                    min_left_exec_time_2[left_len_2] = min_right_exec_time_2[1];
+                    left_len_2 += 1;
+                    for (int right_delete = 0 ; right_delete < (right_len_2 - 1) ; right_delete++){
+                        min_right_data_num_2[right_delete] = min_right_data_num_2[right_delete + 1];
+                        min_right_exec_time_2[right_delete] = min_right_exec_time_2[right_delete + 1];
+                    }
+                    min_right_data_num_2[(right_len_2 - 1)] = 0;
+                    min_right_exec_time_2[(right_len_2 - 1)] = 0;
+                    right_len_2 -= 1;
+                    free(left_coef_2);
+                    free(right_coef_2);
+                    break;
+                }
+            } else{
+                printf("case 3_2\n");
+                double left_worsed = left_error_rate - min_left_error_rate_2;
+                double right_improved = min_right_error_rate_2 - right_error_rate;
+                if (right_improved > left_worsed){
+                    printf("updated to %lf, %lf\n", left_error_rate, right_error_rate);
+                    min_left_error_2 = left_error;
+                    min_right_error_2 = right_error;
+                    min_left_error_rate_2 = left_error_rate;
+                    min_right_error_rate_2 = right_error_rate;
+                    free(min_left_coef_2);
+                    free(min_right_coef_2);
+                    min_left_coef_2 = left_coef_2;
+                    min_right_coef_2 = right_coef_2;
+                    min_left_len_2 = left_len_2;
+                    min_right_len_2 = right_len_2;
+                } else{
+                    printf("break\n");
+                    // Roll back 
+                    min_left_data_num_2[left_len_2] = min_right_data_num_2[1];
+                    min_left_exec_time_2[left_len_2] = min_right_exec_time_2[1];
+                    left_len_2 += 1;
+                    for (int right_delete = 0 ; right_delete < (right_len_2 - 1) ; right_delete++){
+                        min_right_data_num_2[right_delete] = min_right_data_num_2[right_delete + 1];
+                        min_right_exec_time_2[right_delete] = min_right_exec_time_2[right_delete + 1];
+                    }
+                    min_right_data_num_2[(right_len_2 - 1)] = 0;
+                    min_right_exec_time_2[(right_len_2 - 1)] = 0;
+                    right_len_2 -= 1;
+                    free(left_coef_2);
+                    free(right_coef_2);
+                    break;
+                } 
+            }
+        }   
+        if ((min_left_error_rate_1 < 5) | (min_right_error_rate_1 < 5)){
+            printf("small enough - break\n");
+            // Roll back 
+            min_left_data_num_2[left_len_2] = min_right_data_num_2[1];
+            min_left_exec_time_2[left_len_2] = min_right_exec_time_2[1];
+            left_len_2 += 1;
+            for (int right_delete = 0 ; right_delete < (right_len_2 - 1) ; right_delete++){
+                min_right_data_num_2[right_delete] = min_right_data_num_2[right_delete + 1];
+                min_right_exec_time_2[right_delete] = min_right_exec_time_2[right_delete + 1];
+            }
+            min_right_data_num_2[(right_len_2 - 1)] = 0;
+            min_right_exec_time_2[(right_len_2 - 1)] = 0;
+            right_len_2 -= 1;
+            free(left_coef_2);
+            free(right_coef_2);
+            break;
+        }
+        if ((min_left_len_1 < 4) | (min_right_len_1 < 4)){
+            printf("too small data for range - break\n");
+            // Roll back 
+            min_left_data_num_2[left_len_2] = min_right_data_num_2[1];
+            min_left_exec_time_2[left_len_2] = min_right_exec_time_2[1];
+            left_len_2 += 1;
+            for (int right_delete = 0 ; right_delete < (right_len_2 - 1) ; right_delete++){
+                min_right_data_num_2[right_delete] = min_right_data_num_2[right_delete + 1];
+                min_right_exec_time_2[right_delete] = min_right_exec_time_2[right_delete + 1];
+            }
+            min_right_data_num_2[(right_len_2 - 1)] = 0;
+            min_right_exec_time_2[(right_len_2 - 1)] = 0;
+            right_len_2 -= 1;
+            free(left_coef_2);
+            free(right_coef_2);
+            break;
+        }
+    }
+    printf("phase 2 result: %lf, %lf / boundary: %lf\n", min_left_error_rate_2, min_right_error_rate_2, min_right_data_num_2[0]);
+    /*
+    for (int x = 0 ; x < EXEC_ORDER + 1 ; x++){
+        printf("%e ", min_left_coef_2[x]);
+    }
+    printf("\n");
+    for (int y = 0 ; y < EXEC_ORDER + 1 ; y++){
+        printf("%e ", min_right_coef_2[y]);
+    }
+    printf("\n");
+    */
+    //print_data(min_left_data_num_2, min_left_len_2);
+    //print_data(min_right_data_num_2, min_right_len_2);
+
+    print_data(min_left_data_num_1, min_left_len_1);
+    print_data(min_right_data_num_1, min_right_len_1);
+
+    if (min_left_error_rate_1 + min_right_error_rate_1 < min_left_error_rate_2 + min_right_error_rate_2){
+        printf("Final result: %lf, %lf / boundary: %lf\n", min_left_error_rate_1, min_right_error_rate_1, min_right_data_num_1[0]);
+        for (int x = 0 ; x < EXEC_ORDER + 1 ; x++){
+            printf("%e ", min_left_coef_1[x]);
+        }
+        printf("\n");
+        for (int y = 0 ; y < EXEC_ORDER + 1 ; y++){
+            printf("%e ", min_right_coef_1[y]);
+        }
+        printf("\n");
+        *min_left_data_num = min_left_data_num_1;
+        *min_right_data_num = min_right_data_num_1;
+        *min_left_exec_time = min_left_exec_time_1;
+        *min_right_exec_time = min_right_exec_time_1;
+        *min_left_coef = min_left_coef_1;
+        *min_right_coef = min_right_coef_1;
+        *data1_len = min_left_len_1;
+        *data2_len = min_right_len_1;
+        free(min_left_data_num_2);
+        free(min_right_data_num_2);
+        free(min_left_exec_time_2);
+        free(min_right_exec_time_2);
+        free(min_left_coef_2);
+        free(min_right_coef_2);
+    } else{
+        printf("Final result: %lf, %lf / boundary: %lf\n", min_left_error_rate_2, min_right_error_rate_2, min_right_data_num_2[0]);
+        for (int x = 0 ; x < EXEC_ORDER + 1 ; x++){
+            printf("%e ", min_left_coef_2[x]);
+        }
+        printf("\n");
+        for (int y = 0 ; y < EXEC_ORDER + 1 ; y++){
+            printf("%e ", min_right_coef_2[y]);
+        }
+        printf("\n");
+        *min_left_data_num = min_left_data_num_2;
+        *min_right_data_num = min_right_data_num_2;
+        *min_left_exec_time = min_left_exec_time_2;
+        *min_right_exec_time = min_right_exec_time_2;
+        *min_left_coef = min_left_coef_2;
+        *min_right_coef = min_right_coef_2;
+        *data1_len = min_left_len_2;
+        *data2_len = min_right_len_2;
+        free(min_left_data_num_1);
+        free(min_right_data_num_1);
+        free(min_left_exec_time_1);
+        free(min_right_exec_time_1);
+        free(min_left_coef_1);
+        free(min_right_coef_1);
+    }
+
+    return 0;
+}
+
+
+void get_init_values(double** num1, double** num2, double** num3, 
+                     double** exec_time1, double** exec_time2, double** exec_time3,
+                     int* len1, int* len2, int* len3){
+                         
+    int data1_len = 15;
+    int data2_len = 13;
+    int data3_len = 18;
+
+    double data_num1_saved[] = {1.5, 2.5, 6.5, 14, 15, 25, 30, 50, 65, 130, 140, 280, 300, 500, 1300};
+    double data_num2_saved[] = {1300, 2800, 3000, 5000, 13000, 15000, 25000, 28000, 33000, 55000, 65000, 75000, 125000};
+    double data_num3_saved[] = {125000, 130000, 143000, 150000, 225000, 250000, 308000, 325000, 330000, 375000, 550000, 650000, 700000, 975000, 1400000, 1430000, 2100000, 3080000};
+    double q1_exec_time1_saved[] = {5.009, 11.191, 7.748 , 16.792 , 28.235 , 30.145 , 38.956 , 41.345 , 35.973 , 52.418 , 45.241 , 72.999 , 209.909 , 240.505, 365.524};
+    double q1_exec_time2_saved[] = {365.524, 548.974, 6666.357, 7450.265, 10573.282, 11350.895, 15220.229, 16374.973, 23334.794, 25803.333, 30390.761, 48559.641, 56551.836};
+    double q1_exec_time3_saved[] = {56551.836, 54036.095, 43052.146, 61071.692, 86508.129, 94670.007, 57944.830, 89096.379, 229580.474, 133318.417, 
+                                    240975.250, 208061.190, 139562.096, 285402.931, 385307.503, 404717.703, 605279.805, 1205969.281};
+
+    double* data_num1 = (double *)malloc(sizeof(double) * DATASIZE);
+    double* data_num2 = (double *)malloc(sizeof(double) * DATASIZE);
+    double* data_num3 = (double *)malloc(sizeof(double) * DATASIZE);
+    double* q1_exec_time1 = (double *)malloc(sizeof(double) * DATASIZE);
+    double* q1_exec_time2 = (double *)malloc(sizeof(double) * DATASIZE);
+    double* q1_exec_time3 = (double *)malloc(sizeof(double) * DATASIZE);
+
+    for (int i = 0 ; i < data1_len ; i++){
+        data_num1[i] = data_num1_saved[i];
+        q1_exec_time1[i] = q1_exec_time1_saved[i];
+    }
+    for (int j = 0 ; j < data2_len ; j++){
+        data_num2[j] = data_num2_saved[j];
+        q1_exec_time2[j] = q1_exec_time2_saved[j];
+    }
+    for (int k = 0 ; k < data3_len ; k++){
+        data_num3[k] = data_num3_saved[k];
+        q1_exec_time3[k] = q1_exec_time3_saved[k];
+    }
+
+    *num1 = data_num1;
+    *num2 = data_num2;
+    *num3 = data_num3;
+
+    *exec_time1 = q1_exec_time1;
+    *exec_time2 = q1_exec_time2;
+    *exec_time3 = q1_exec_time3;
+
+    *len1 = data1_len;
+    *len2 = data2_len;
+    *len3 = data3_len;
+}
+
+void add_new_data(double** num1, double** num2, double** num3, 
+                  double** exec_time1, double** exec_time2, double** exec_time3,
+                  int* len1, int* len2, int* len3,
+                  double** coef1, double** coef2, double** coef3, 
+                  double new_data_num_add, double new_exec_time_add){
+
+    double* data_num1 = *num1;
+    double* data_num2 = *num2;
+    double* data_num3 = *num3;
+    
+    double* q1_exec_time1 = *exec_time1;
+    double* q1_exec_time2 = *exec_time2;
+    double* q1_exec_time3 = *exec_time3;
+
+    int data1_len = *len1;
+    int data2_len = *len2;
+    int data3_len = *len3;
+
+    double* exec_coef1 = *coef1;
+    double* exec_coef2 = *coef2;
+    double* exec_coef3 = *coef3;
+
+    if (new_data_num_add <= data_num2[0]){ // data range 1
+        for (int i = 0 ; i < data1_len ; i++){
+            if (data_num1[i] >= new_data_num_add){
+                if (data_num1[i] == new_data_num_add){
+                    printf("data already existed\n");
+                    q1_exec_time1[i] = (q1_exec_time1[i] + new_exec_time_add) / 2;
+                    break;
+                } else{
+                    for (int j = (data1_len - 1) ; j >= i ; j--){
+                        data_num1[j + 1] = data_num1[j];
+                        q1_exec_time1[j + 1] = q1_exec_time1[j];
+                    }
+                    data_num1[i] = new_data_num_add;
+                    q1_exec_time1[i] = new_exec_time_add;
+                    data1_len++;
+                    break;
+                }
+            }
+        }
+    }
+    else if (new_data_num_add <= data_num3[0]){ // data range 2
+        for (int i = 0 ; i < data2_len ; i++){
+            if (data_num2[i] >= new_data_num_add){
+                if (data_num2[i] == new_data_num_add){
+                    printf("data already existed\n");
+                    q1_exec_time2[i] = (q1_exec_time2[i] + new_exec_time_add) / 2;
+                    break;
+                } else{
+                    for (int j = (data2_len - 1) ; j >= i ; j--){
+                        data_num2[j + 1] = data_num2[j];
+                        q1_exec_time2[j + 1] = q1_exec_time2[j];
+                    }
+                    data_num2[i] = new_data_num_add;
+                    q1_exec_time2[i] = new_exec_time_add;
+                    data2_len++;
+                    break;
+                }
+            }
+        }
+    } else{ // data range 3
+        for (int i = 0 ; i < data3_len ; i++){
+            if (data_num3[i] >= new_data_num_add){
+                if (data_num3[i] == new_data_num_add){
+                    printf("data already existed\n");
+                    q1_exec_time3[i] = (q1_exec_time3[i] + new_exec_time_add) / 2;
+                    break;
+                } else{
+                    for (int j = (data3_len - 1) ; j >= i ; j--){
+                        data_num3[j + 1] = data_num3[j];
+                        q1_exec_time3[j + 1] = q1_exec_time3[j];
+                    }
+                    data_num3[i] = new_data_num_add;
+                    q1_exec_time3[i] = new_exec_time_add;
+                    data3_len++;
+                    break;
+                }
+            }
+        }
+    }
+
+    if (adjust_range(data_num1, data_num2, q1_exec_time1, q1_exec_time2, &data1_len, &data2_len,
+                     &data_num1, &data_num2, &q1_exec_time1, &q1_exec_time2, &exec_coef1, &exec_coef2, true)){
+        printf("Error occured in adj 1\n");
+    }
+    if (adjust_range(data_num2, data_num3, q1_exec_time2, q1_exec_time3, &data2_len, &data3_len,
+                     &data_num2, &data_num3, &q1_exec_time2, &q1_exec_time3, &exec_coef2, &exec_coef3, false)){
+        printf("Error occured in adj 2\n");
+    }
 }
 
 /* ----------------------------------------------------------------
@@ -5721,10 +6806,20 @@ PostgresMain(int argc, char *argv[],
 		 */
 		DoingCommandRead = true;
 
+		if (start_time_recorded){
+			printf("Not time checked (not simple query)\n");
+		}
+		start_time_recorded = false;
+
 		/*
 		 * (3) read a command (loop blocks here)
 		 */
 		firstchar = ReadCommand(&input_message);
+		printf("------------------------------------------new loop------------------------------------------\n");
+
+		start_time_recorded = true;
+		query_start_time = clock();
+		printf("start time: %lf\n", (double)query_start_time);
 
 		/*
 		 * (4) turn off the idle-in-transaction timeout, if active.  We do
@@ -5789,6 +6884,17 @@ PostgresMain(int argc, char *argv[],
 					else
 						exec_simple_query(query_string);
 
+					if (start_time_recorded){
+						query_end_time = clock();
+						printf("end time: %lf\n", (double)query_end_time);
+						printf("Time used: %lf\n", ((double)(query_end_time - query_start_time) / CLOCKS_PER_SEC) * 1000);
+						start_time_recorded = false;
+					}
+					if (num_rows_recorded){
+						printf("row number fetched from dataset: %ld\n", num_rows);
+						num_rows_recorded = false;
+					}
+
 					if (train_flag){
 						printf("train flag come----\n");
 						char* train_table_create_query = tree_table_query_creator();
@@ -5798,6 +6904,98 @@ PostgresMain(int argc, char *argv[],
 						printf("train flag solved----\n");
 						free(train_table_create_query);
 					}
+					if ((!inited) & (USE_ADAPTIVE_RANGE)){
+						inited = true;
+						get_init_values(&data_num1, &data_num2, &data_num3, &q1_exec_time1, &q1_exec_time2, &q1_exec_time3, &data1_len, &data2_len, &data3_len);
+						
+						printf("Initalized\n");
+						print_data(data_num1, data1_len);
+						printf("data1 len: %d\n", data1_len);
+
+						print_data(data_num2, data2_len);
+						printf("data2 len: %d\n", data2_len);
+
+						print_data(data_num3, data3_len);
+						printf("data3 len: %d\n", data3_len);
+
+						get_init_values(&data_num1, &data_num2, &data_num3, &q1_exec_time1, &q1_exec_time2, &q1_exec_time3, &data1_len, &data2_len, &data3_len);
+    
+						if (adjust_range(data_num1, data_num2, q1_exec_time1, q1_exec_time2, &data1_len, &data2_len,
+										&data_num1, &data_num2, &q1_exec_time1, &q1_exec_time2, &exec_coef1, &exec_coef2, true)){
+							printf("Error occured in adj 1\n");
+						}
+						if (adjust_range(data_num2, data_num3, q1_exec_time2, q1_exec_time3, &data2_len, &data3_len,
+										&data_num2, &data_num3, &q1_exec_time2, &q1_exec_time3, &exec_coef2, &exec_coef3, false)){
+							printf("Error occured in adj 2\n");
+						}
+						
+						printf("Final Restult\n");
+						print_data(data_num1, data1_len);
+						for (int x = 0 ; x < EXEC_ORDER + 1 ; x++){
+							printf("%e ", exec_coef1[x]);
+						}
+						printf("\n");
+						printf("data1 len: %d\n", data1_len);
+
+						print_data(data_num2, data2_len);
+						for (int y = 0 ; y < EXEC_ORDER + 1 ; y++){
+							printf("%e ", exec_coef2[y]);
+						}
+						printf("\n");
+						printf("data2 len: %d\n", data2_len);
+
+						print_data(data_num3, data3_len);
+						for (int z = 0 ; z < EXEC_ORDER + 1 ; z++){
+							printf("%e ", exec_coef3[z]);
+						}
+						printf("\n");
+						printf("data3 len: %d\n", data3_len);
+
+						double new_data_num_predict = 375000000;
+						double new_exec_time_predict = 0;
+
+						if (new_data_num_predict <= data_num2[0]){
+							new_exec_time_predict = polyval(new_data_num_predict, exec_coef1);
+						} else if (new_data_num_predict <= data_num3[0]){
+							new_exec_time_predict = polyval(new_data_num_predict, exec_coef2);
+						} else{
+							new_exec_time_predict = polyval(new_data_num_predict, exec_coef3);
+						}
+
+						printf("Predicted for %lf -> %lf\n", new_data_num_predict, new_exec_time_predict);
+
+						double new_data_num_add = 35000 / 1000;
+						double new_exec_time_add = 39.5;
+
+						add_new_data(&data_num1, &data_num2,  &data_num3, 
+									&q1_exec_time1, &q1_exec_time2, &q1_exec_time3,
+									&data1_len, &data2_len, &data3_len,
+									&exec_coef1, &exec_coef2,  &exec_coef3,
+									new_data_num_add, new_exec_time_add);
+
+						printf("Final Restult 2\n");
+						print_data(data_num1, data1_len);
+						for (int x = 0 ; x < EXEC_ORDER + 1 ; x++){
+							printf("%e ", exec_coef1[x]);
+						}
+						printf("\n");
+						printf("data1 len: %d\n", data1_len);
+
+						print_data(data_num2, data2_len);
+						for (int y = 0 ; y < EXEC_ORDER + 1 ; y++){
+							printf("%e ", exec_coef2[y]);
+						}
+						printf("\n");
+						printf("data2 len: %d\n", data2_len);
+
+						print_data(data_num3, data3_len);
+						for (int z = 0 ; z < EXEC_ORDER + 1 ; z++){
+							printf("%e ", exec_coef3[z]);
+						}
+						printf("\n");
+						printf("data3 len: %d\n", data3_len);
+					}
+
 					send_ready_for_query = true;
 				}
 				break;
