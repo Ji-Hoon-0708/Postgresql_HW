@@ -2308,16 +2308,16 @@ sw_stack_for_hw(const char* query_string, List* querytrees){
 		
 		// get additional information for specific cases
 		if ((op_info.hw_operation == LINREGR) | (op_info.hw_operation == LOGREGR)){
-			/*
-			int model_col_num;
-			for (int now_model_num = 0 ; now_model_num < rtable_colnum[1] ; now_model_num++){
-				if (hw_strcmp(op_info.model_col_name, rtable_colname[1][now_model_num])){
-					model_col_num = now_model_num;
-					break;
-				}
-			}
-			printf("model col num: %d\n", model_col_num);
-			*/
+
+			//int model_col_num;
+			//for (int now_model_num = 0 ; now_model_num < rtable_colnum[1] ; now_model_num++){
+			//	if (hw_strcmp(op_info.model_col_name, rtable_colname[1][now_model_num])){
+			//		model_col_num = now_model_num;
+			//		break;
+			//	}
+			//}
+			//printf("model col num: %d\n", model_col_num);
+
     		uint32_t mask_base = 0 | 1;
 
 			int* model_col_num = (int *)malloc(sizeof(int) * op_info.model_col_len);
@@ -2419,7 +2419,7 @@ sw_stack_for_hw(const char* query_string, List* querytrees){
 		if (op_info.aggr_flag){
 			printf("aggr phase\n");
 		}
-
+		
 		// Predictor
 		// Cost approx function
 		double page_num;
@@ -2427,9 +2427,10 @@ sw_stack_for_hw(const char* query_string, List* querytrees){
 		printf("Extracted data num: %f\n", new_data_num);
 		num_rows_recorded = true;
 		num_rows = new_data_num;
-
+		
 		double new_exec_time_predict = 0;
 		double new_data_num_predict = new_data_num / 1000;
+		
 		if (USE_ADAPTIVE_RANGE){
 			if ((data1_len[query_num] > ADJ_MIN_DATANUM) & (data2_len[query_num] > ADJ_MIN_DATANUM) & (data3_len[query_num] > ADJ_MIN_DATANUM)){
 				printf("\t-------HW predictor debugging-------\n\t");
@@ -2470,7 +2471,7 @@ sw_stack_for_hw(const char* query_string, List* querytrees){
 				printf("CPU cost prediction -> not enough data gathered\n");
 			}
 		}
-
+		
 		free_operation_info(&op_info);
 		free(rtable_id);
 		free(rtable_relid);
@@ -2480,7 +2481,7 @@ sw_stack_for_hw(const char* query_string, List* querytrees){
 		free(rtable_name);
 		free(rtable_colnum);
 		free(rtable_colsel);
-		for (int query_cnt = 0 ; query_cnt < query_num ; query_cnt++){
+		for (int query_cnt = 0 ; query_cnt < query_num_local ; query_cnt++){
 			for (int free_rtable_colsel = 0 ; free_rtable_colsel < rtable_num ; free_rtable_colsel++){
 				free(rtable_colname[query_cnt][free_rtable_colsel]);
 			}
@@ -2772,7 +2773,7 @@ int adjust_range(double* data_num1, double* data_num2, double* exec_time1, doubl
         printf("Error occured in get_avg_error\n");
     }
     //printf("[right] error: %lf, error_rate: %lf\n", def_right_error, def_right_error_rate);
-    printf("[left] error_rate: %lf [right] error_rate: %lf\n", def_left_error_rate, def_right_error_rate);
+    //printf("[left] error_rate: %lf [right] error_rate: %lf\n", def_left_error_rate, def_right_error_rate);
 
     //print_data(data_num1, def_data1_len);
     //print_data(data_num2, def_data2_len);
@@ -2975,7 +2976,7 @@ int adjust_range(double* data_num1, double* data_num2, double* exec_time1, doubl
             break;
         }
     }
-    printf("phase 1 result: %lf, %lf / boundary: %lf\n", min_left_error_rate_1, min_right_error_rate_1, min_right_data_num_1[0]);
+    //printf("phase 1 result: %lf, %lf / boundary: %lf\n", min_left_error_rate_1, min_right_error_rate_1, min_right_data_num_1[0]);
     /*
     for (int x = 0 ; x < EXEC_ORDER + 1 ; x++){
         printf("%e ", min_left_coef_1[x]);
@@ -3183,7 +3184,7 @@ int adjust_range(double* data_num1, double* data_num2, double* exec_time1, doubl
             break;
         }
     }
-    printf("phase 2 result: %lf, %lf / boundary: %lf\n", min_left_error_rate_2, min_right_error_rate_2, min_right_data_num_2[0]);
+    //printf("phase 2 result: %lf, %lf / boundary: %lf\n", min_left_error_rate_2, min_right_error_rate_2, min_right_data_num_2[0]);
     /*
     for (int x = 0 ; x < EXEC_ORDER + 1 ; x++){
         printf("%e ", min_left_coef_2[x]);
@@ -7655,7 +7656,7 @@ PostgresMain(int argc, char *argv[],
 				}
 
 				inited = true;
-				//printf("data1 len: %d data2 len: %d data3 len: %d\n", data1_len[query_num], data2_len[query_num], data3_len[query_num]);
+				// printf("data1 len: %d data2 len: %d data3 len: %d\n", data1_len[query_num], data2_len[query_num], data3_len[query_num]);
 			}
 		} else if (USE_ADAPTIVE_RANGE){
 			if (!inited){
@@ -7864,12 +7865,12 @@ PostgresMain(int argc, char *argv[],
 
 					if (train_flag){
 						printf("train flag come----\n");
-						char* train_table_create_query = tree_table_query_creator();
+						//char* train_table_create_query = tree_table_query_creator();
 						//printf("query: %s\n", train_table_create_query);
-						exec_simple_query(train_table_create_query);
-						train_flag = false;
-						printf("train flag solved----\n");
-						free(train_table_create_query);
+						//exec_simple_query(train_table_create_query);
+						//train_flag = false;
+						//printf("train flag solved----\n");
+						//free(train_table_create_query);
 					}
 
 
@@ -7905,7 +7906,7 @@ PostgresMain(int argc, char *argv[],
 						}
 
 					} 
-					printf("End of loop - Query num: %d [data1 len: %d, data2 len: %d, data3 len: %d]\n", query_num + 1, data1_len[query_num], data2_len[query_num], data3_len[query_num]);
+					// printf("End of loop - Query num: %d [data1 len: %d, data2 len: %d, data3 len: %d]\n", query_num + 1, data1_len[query_num], data2_len[query_num], data3_len[query_num]);
 
 					query_num_recorded = false;
 					start_time_recorded = false;
