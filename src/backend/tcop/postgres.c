@@ -280,15 +280,139 @@ static char *tree_table_name;
 #define SMALLERSAME			5
 
 /*--------------------------------------------------------
+ *	#define query species
+ *------------------------------------------------------*/
+
+#define	Q1								0
+#define	Q2								1
+#define Q3								2
+#define	Q4								3
+#define Q5								4
+#define	Q6								5
+#define Q7								6
+#define Q8								7
+#define Q9								8
+#define Q10								9
+#define Q11								10
+
+/*--------------------------------------------------------
+ *	#define datasets
+ *------------------------------------------------------*/
+
+#define HIGGS							1	// > 17
+#define FOREST							2	// 9-16
+#define WILT							4	// 5-8
+#define HABERMAN						8	// 1-4
+
+//////////////////////////////////////////////////////////////////
+//	Database
+//////////////////////////////////////////////////////////////////
+
+#define PAGE_SIZE						8192
+#define UNIT_DATABASE_SIZE				1073741824
+
+//////////////////////////////////////////////////////////////////
+// NOTE: Configure these params...
+#define USER_TOTAL_LUT					320000			
+#define USER_TOTAL_FF					862374
+#define USER_TOTAL_URAM					120
+#define USER_TOTAL_BRAM					673
+#define USER_TOTAL_DSP					1959
+
+#define USER_DRAM_SIZE					4
+#define USER_DRAM_CH					1
+
+#define USER_SSD2FPGA_BW				4
+#define USER_DRAM2FPGA_BW				19.2
+#define USER_FPGA2HOST_BW				4
+
+#define USER_CLOCK						170
+
+// NOTE: Host timing information
+#define HOST_ADDRESSMAP_LATENCY			0.44
+#define HOST_SETKERNEL_LATENCY			0.08
+
+#define HOST_CREATEBUF_LATENCY_0		56.415	// 0.5GB
+#define HOST_CREATEBUF_LATENCY_1		12.845	// 0.1GB
+#define HOST_CREATEBUF_LATENCY_2		4.085	// 0.01GB
+#define HOST_CREATEBUF_LATENCY_3		3.095	// 0.001GB
+#define HOST_CREATEBUF_LATENCY_4		2.842	// 0.0001GB
+
+//////////////////////////////////////////////////////////////////
+// NOTE: Rule-based information about FPGA parmeter
+#define SMARTSSD_TOTAL_LUT				522720
+#define SMARTSSD_TOTAL_FF				1045440
+#define SMARTSSD_TOTAL_URAM				128
+#define SMARTSSD_TOTAL_BRAM				984
+#define SMARTSSD_TOTAL_DSP				1968
+
+#define SMARTSSD_SHELL_LUT				126830
+#define SMARTSSD_SHELL_FF				183066
+#define SMARTSSD_SHELL_URAM				8	
+#define SMARTSSD_SHELL_BRAM				311
+#define SMARTSSD_SHELL_DSP				9
+
+// NOTE: Variable by core number
+#define SMARTSSD_CORE_VAR_LUT			105998			
+#define SMARTSSD_CORE_VAR_FF			92258
+#define SMARTSSD_CORE_VAR_URAM			32
+#define SMARTSSD_CORE_VAR_BRAM			15
+#define SMARTSSD_CORE_VAR_DSP			342
+
+// NOTE: Constant by core number
+#define SMARTSSD_CORE_CONST_LUT			10708
+#define SMARTSSD_CORE_CONST_FF			9750
+#define SMARTSSD_CORE_CONST_URAM		0
+#define SMARTSSD_CORE_CONST_BRAM		22
+#define SMARTSSD_CORE_CONST_DSP			10
+
+// NOTE: Rule-based information about FPGA DRAM parameter (GB)
+#define SMARTSSD_DRAM_SIZE				4
+#define SMARTSSD_DRAM_CH				1
+
+// NOTE: Rule-based information about BW parameter (GB/s)
+#define SMARTSSD_SSD2FPGA_BW			4		
+#define SMARTSSD_DRAM2FPGA_BW			19.2
+#define SMARTSSD_FPGA2HOST_BW			4
+
+#define SMARTSSD_DATABASE_SIZE_STD_0	536870912			// 0.5GB
+#define SMARTSSD_DATABASE_SIZE_STD_1	107380736			// 0.1GB
+#define SMARTSSD_DATABASE_SIZE_STD_2	10731520			// 0.01GB
+#define SMARTSSD_DATABASE_SIZE_STD_3	1064960				// 0.001GB
+#define SMARTSSD_DATABASE_SIZE_STD_4	98304				// 0.0001GB
+
+#define SMARTSSD_SSD2FPGA_EFFBW_0		3489660928			// 3.25GB/s, 0.5GB
+#define SMARTSSD_SSD2FPGA_EFFBW_1		3328599654.4		// 3.10GB/s, 0.1GB
+#define SMARTSSD_SSD2FPGA_EFFBW_2		2641404887.04		// 2.46GB/s, 0.01GB
+#define SMARTSSD_SSD2FPGA_EFFBW_3		1181116006.4		// 1.10GB/s, 0.001GB
+#define SMARTSSD_SSD2FPGA_EFFBW_4		493921239.04		// 0.46GB/s, 0.0001GB
+
+#define SMARTSSD_OUTBUF_SIZE_STD_0		264240				// 130*4096/2, 0.001GB
+#define SMARTSSD_OUTBUF_SIZE_STD_1		24576				// 12*4096/2,  0.0001GB
+
+#define SMARTSSD_FPGA2HOST_EFFBW_0		934155386.88		// 0.87GB/s, 0.001GB
+#define SMARTSSD_FPGA2HOST_EFFBW_1		311385128.96		// 0.29GB/s, 0.0001GB
+
+// NOTE: Query characteristic
+#define USER_LAYER_NUM					2
+
+/*--------------------------------------------------------
  *	#defines for adaptive range
  *------------------------------------------------------*/
 
 #define MATRIX_VALUE_PTR(pA, row, col) (&(((pA)->pContents)[(row * (pA)->cols) + col]))
 #define	ABS(x) (((x) < 0) ? -(x) : (x))
+#define QUERYNUM 11
 #define DATASIZE 50
 #define EXEC_ORDER 3
+# define ADJ_MIN_DATANUM 3
+// 00: not use anything
+// 10: only simulate once
+// 01: start from zero data
+// 11: not sim, but do init using pre-measured data
 
-#define USE_ADAPTIVE_RANGE 0
+#define SIM_ADAPTIVE_RANGE 1
+#define USE_ADAPTIVE_RANGE 1
 
 typedef struct matrix_s{
 	int	rows;
@@ -296,35 +420,40 @@ typedef struct matrix_s{
 	double *pContents;
 } matrix_t;
 
+double polyval(double new_data, double* exec_coef);
 static matrix_t *createMatrix(int rows, int cols);
 static void destroyMatrix(matrix_t *pMat);
 static matrix_t *createTranspose(matrix_t *pMat);
 static matrix_t *createProduct(matrix_t *pLeft, matrix_t *pRight);
 
-static int data1_len;
-static int data2_len;
-static int data3_len;
+int* data1_len;
+int* data2_len;
+int* data3_len;
 
-static double* data_num1;
-static double* data_num2;
-static double* data_num3;
+double** data_num1;
+double** data_num2;
+double** data_num3;
 
-static double* q1_exec_time1;
-static double* q1_exec_time2;
-static double* q1_exec_time3;
+double** exec_time1;
+double** exec_time2;
+double** exec_time3;
 
-static double* exec_coef1;
-static double* exec_coef2;
-static double* exec_coef3;
+double** exec_coef1;
+double** exec_coef2;
+double** exec_coef3;
 
 static bool inited = false;
+static bool cpu_used = true;
+
+static bool query_num_recorded = false;
+static int query_num;
 
 static bool start_time_recorded = false;
 static clock_t query_start_time;
 static clock_t query_end_time;
 
 static bool num_rows_recorded = false;
-static uint64 num_rows;
+static double num_rows;
 
 // wrapper function
 void set_num_rows(uint64 input)
@@ -377,6 +506,7 @@ struct operation_info{
 	// hw operation info
 	bool hw_support;
 	int hw_operation;
+	int hw_query_num;
 	// table info
 	char* data_table_name;
 	char* model_table_name; 
@@ -487,11 +617,14 @@ hw_filterhashmap(char* str) {
 		return 0;
 }
 
+// operation info extracting functionality
+
 static void 
 init_operation_info(struct operation_info *info){
 	// hw operation info
 	info->hw_support = false;
 	info->hw_operation = NONE;
+	info->hw_query_num = -1;
 	// table info
 	info->data_table_name = NULL;
 	info->model_table_name = NULL;
@@ -780,6 +913,49 @@ extract_operation_info(char** word_array, int word_size, struct operation_info *
 	return;
 }
 
+int get_query_num(struct operation_info info){
+	int query_num = -1;
+	if (info.hw_support){
+		switch (info.hw_operation){
+			case (LINREGR):
+				if ((info.filter_flag) & (info.aggr_flag)){
+					query_num = Q4;	
+				} else if (info.filter_flag){
+					query_num = Q2;	
+				} else if (info.aggr_flag){
+					query_num = Q3;	
+				} else{
+					query_num = Q1;	
+				}
+				break;
+			case (LOGREGR):
+				if ((info.filter_flag) & (info.aggr_flag)){
+					query_num = Q8;	
+				} else if (info.filter_flag){
+					query_num = Q6;	
+				} else if (info.aggr_flag){
+					query_num = Q7;	
+				} else{
+					query_num = Q5;	
+				}			
+				break;
+			case (SVM):
+				query_num = Q9;	
+				break;
+			case (MLP):
+				query_num = Q10;	
+				break;
+			case (TREE):
+				query_num = Q11;	
+				break;		
+		}
+	}
+	if (query_num == -1){
+		printf("query classification error\n");
+	}
+	return query_num;
+}
+
 void printf_op_info(struct operation_info info){
 	printf("\t-------operation info debugging-------\n\t");
 
@@ -800,10 +976,7 @@ void printf_op_info(struct operation_info info){
 				break;
 			case TREE:
 				printf("hw_operation: %s\n\t", "TREE");
-				break;	
-			case FOREST:
-				printf("hw_operation: %s\n\t", "FOREST");
-				break;				
+				break;		
 		}
 		printf("data_table_name: %s\n\t", info.data_table_name);
 		printf("model_table_name: %s\n\t", info.model_table_name);
@@ -879,6 +1052,8 @@ void printf_op_info(struct operation_info info){
 	printf("--------------------------------------\n");
 }
 
+// sw stack + tree table query creator functionality
+
 static void
 hw_query_modification(char* data_table_name, char* model_table_name, char* new_query) {
 	strcpy(new_query, "SELECT * FROM ");
@@ -920,9 +1095,10 @@ calculate_relation_size(RelFileNode *rfn, BackendId backend, ForkNumber forknum)
                         (errcode_for_file_access(),
                          errmsg("could not stat file \"%s\": %m", pathname)));
         }
+		printf("stat_check: %ld (%d)\n", fst.st_size, segcount);
         totalsize += fst.st_size;
     }
- 
+
 	return totalsize;
 }
 
@@ -1041,6 +1217,50 @@ hw_str_delete(char* str, char ch) {
 	}
 }
 
+// memory dump functionality
+
+static void 
+printchar(unsigned char c){
+	if (isprint(c)){
+ 		printf("%c", c);
+	}
+ 	else{
+ 		printf(".");
+	}
+}
+
+static void 
+dumpmem(unsigned char *buff, int len){
+	int i;
+	for (i = 0 ; i < len ; i++){
+		if (i % 16 == 0){
+			printf("0x%08x ", &buff[i]);
+		}
+		printf("%02x ", buff[i]);
+		if (i % 16 - 15 == 0){
+			int j;
+			printf("" "");
+			for (j = i - 15 ; j <= i ; j++){
+				printchar(buff[j]);
+			}
+			printf("\n");
+		}
+	}
+	if (i % 16 != 0){
+		int j;
+		int spaces = (len - i + 16 - i % 16)*3 + 2;
+		for (j = 0 ; j < spaces ; j++){
+			printf("" ""); 
+		}
+		for(j = i - (i % 16) ; j < len ; j++){
+			printchar(buff[j]);
+		}
+	}
+	printf("\n");
+} 
+
+// sw stack + tree table query creator functionality
+
 static Page
 get_page_from_raw(bytea *raw_page)
 {
@@ -1074,6 +1294,28 @@ get_raw_from_rel(Relation rel){
 	raw_page_data = VARDATA(raw_page);
 
 	buf = ReadBufferExtended(rel, MAIN_FORKNUM, 0, RBM_NORMAL, NULL);
+	LockBuffer(buf, BUFFER_LOCK_SHARE);
+
+	memcpy(raw_page_data, BufferGetPage(buf), BLCKSZ);
+
+	LockBuffer(buf, BUFFER_LOCK_UNLOCK);
+	ReleaseBuffer(buf);
+
+	return raw_page;
+}
+
+static bytea *
+get_raw_from_rel_with_bias(Relation rel, int cnt){
+	bytea	   *raw_page; 
+	char	   *raw_page_data;
+	Buffer		buf;
+
+	raw_page = (bytea *) palloc(BLCKSZ + VARHDRSZ);
+	SET_VARSIZE(raw_page, BLCKSZ + VARHDRSZ);
+	raw_page_data = VARDATA(raw_page);
+
+	buf = ReadBufferExtended(rel, MAIN_FORKNUM, cnt, RBM_NORMAL, NULL);
+
 	LockBuffer(buf, BUFFER_LOCK_SHARE);
 
 	memcpy(raw_page_data, BufferGetPage(buf), BLCKSZ);
@@ -1159,46 +1401,6 @@ carefully_incl_addr(ItemId item_id, char* item_base_addr, char *now_data_addr, i
 	}
 }
 
-static void 
-printchar(unsigned char c){
-	if (isprint(c)){
- 		printf("%c", c);
-	}
- 	else{
- 		printf(".");
-	}
-}
-
-static void 
-dumpmem(unsigned char *buff, int len){
-	int i;
-	for (i = 0 ; i < len ; i++){
-		if (i % 16 == 0){
-			printf("0x%08x ", &buff[i]);
-		}
-		printf("%02x ", buff[i]);
-		if (i % 16 - 15 == 0){
-			int j;
-			printf("" "");
-			for (j = i - 15 ; j <= i ; j++){
-				printchar(buff[j]);
-			}
-			printf("\n");
-		}
-	}
-	if (i % 16 != 0){
-		int j;
-		int spaces = (len - i + 16 - i % 16)*3 + 2;
-		for (j = 0 ; j < spaces ; j++){
-			printf("" ""); 
-		}
-		for(j = i - (i % 16) ; j < len ; j++){
-			printchar(buff[j]);
-		}
-	}
-	printf("\n");
-} 
-
 static char*
 tree_table_query_creator(){
 
@@ -1211,11 +1413,6 @@ tree_table_query_creator(){
 	free(tree_table_name);
 
 	printf("using query: %s\n", train_select_query);
-	
-	//pgstat_report_activity(STATE_RUNNING, train_select_query);
-	//TRACE_POSTGRESQL_QUERY_START(train_select_query);
-	//MemoryContext oldcontext;
-	//oldcontext = MemoryContextSwitchTo(MessageContext);
 
 	start_xact_command();
 
@@ -1247,7 +1444,7 @@ tree_table_query_creator(){
 	if (!(tree_table = try_relation_open(tree_table_oid, AccessShareLock))){
 		printf("tree_table_creator - Oid error occured\n");
 	}
-	relation_close(tree_table, AccessShareLock);
+	
 	// Toast raw table check
 	if (OidIsValid(tree_table->rd_rel->reltoastrelid)){
 		Oid tree_data_table_oid = tree_table->rd_rel->reltoastrelid;
@@ -1596,9 +1793,423 @@ tree_table_query_creator(){
 	} else{
 		printf("error - no toast relation in tree table\n");
 	}
-	
+	relation_close(tree_table, AccessShareLock);
+
 	finish_xact_command();
 	return train_select_query;
+}
+
+static double
+get_data_num(Oid table_oid, int table_size, double *page_num){
+	
+	printf("-- get_data_num -- OID = %d\n", table_oid);
+
+	Relation table_rel;
+	if (!(table_rel = try_relation_open(table_oid, AccessShareLock))){
+		printf("get_data_num - Oid error occured\n");
+	}
+
+	char pathname[MAXPGPATH];
+	char *relationpath = relpathbackend(table_rel->rd_node, table_rel->rd_backend, 0);
+	struct stat fst;
+	snprintf(pathname, MAXPGPATH, "%s", relationpath);
+	if (stat(pathname, &fst) < 0){
+		if (errno != ENOENT){
+			ereport(ERROR,
+					(errcode_for_file_access(),
+						errmsg("could not stat file \"%s\": %m", pathname)));
+		}
+	}
+	double total_page_num = fst.st_size/0x2000;
+	*page_num = total_page_num;
+	double total_data_num = 0;
+	double first_page_size = PageGetMaxOffsetNumber(get_page_from_raw(get_raw_from_rel(table_rel)));
+	printf("model page data (first page): %f\n", first_page_size);
+
+	if (total_page_num == 1){
+		total_data_num = first_page_size;
+	} else{
+		double last_page_size = PageGetMaxOffsetNumber(get_page_from_raw(get_raw_from_rel_with_bias(table_rel, (total_page_num - 1))));
+		printf("model page data (last page): %f\n", last_page_size);
+		total_data_num = first_page_size * (total_page_num - 1) + last_page_size;
+	}
+
+	relation_close(table_rel, AccessShareLock);
+
+	return total_data_num;
+}
+
+static double 
+get_hw_expectation_time(int user_query_num, int user_dataset, double user_pagenum){
+
+	// Query configuration
+	const size_t user_query = user_query_num;
+
+	//	BIW resource model
+	const size_t user_total_lut  = USER_TOTAL_LUT;
+	const size_t user_total_ff	 = USER_TOTAL_FF;
+	const size_t user_total_uram = USER_TOTAL_URAM;
+	const size_t user_total_bram = USER_TOTAL_BRAM;
+	const size_t user_total_dsp  = USER_TOTAL_DSP;
+
+	//	Resource check
+	size_t user_core_lut  = user_total_lut - SMARTSSD_CORE_CONST_LUT;
+	size_t user_core_ff   = user_total_ff - SMARTSSD_CORE_CONST_FF;
+	size_t user_core_uram = user_total_uram - SMARTSSD_CORE_CONST_URAM;
+	size_t user_core_bram = user_total_bram - SMARTSSD_CORE_CONST_BRAM;
+	size_t user_core_dsp  = user_total_dsp - SMARTSSD_CORE_CONST_DSP;
+
+	size_t user_corenum_lut  = user_core_lut/SMARTSSD_CORE_VAR_LUT;
+	size_t user_corenum_ff   = user_core_ff/SMARTSSD_CORE_VAR_FF;
+	size_t user_corenum_uram = user_core_uram/SMARTSSD_CORE_VAR_URAM;
+	size_t user_corenum_bram = user_core_bram/SMARTSSD_CORE_VAR_BRAM;
+	size_t user_corenum_dsp  = user_core_dsp/SMARTSSD_CORE_VAR_DSP;
+
+	size_t user_corenum_resource[5] = {user_corenum_lut, user_corenum_ff, user_corenum_uram, user_corenum_bram, user_corenum_dsp};
+
+	size_t user_corenum = user_corenum_resource[0];
+	for(int i=1; i<5; i++) {
+		if(user_corenum >= user_corenum_resource[i])
+			user_corenum = user_corenum_resource[i];
+	}
+
+	//	BIW timing model
+	const size_t user_database_size = ((long long)user_pagenum + 1)*8*1024;
+	const size_t user_ssd2fpga_bw = USER_SSD2FPGA_BW;
+	const size_t user_dram2fpga_bw = USER_DRAM2FPGA_BW*USER_DRAM_CH;
+	const size_t user_fpga2host_bw = USER_FPGA2HOST_BW;
+
+	size_t user_ssd2fpga_factor = user_ssd2fpga_bw/SMARTSSD_SSD2FPGA_BW;
+	size_t user_dram2fpga_factor = user_dram2fpga_bw/SMARTSSD_DRAM2FPGA_BW;
+	size_t user_fpga2host_factor = user_fpga2host_bw/SMARTSSD_FPGA2HOST_BW;
+
+	size_t host_iteration = user_database_size/((long long)UNIT_DATABASE_SIZE*2);
+	size_t page_iteration = (user_database_size-host_iteration*UNIT_DATABASE_SIZE*2)/PAGE_SIZE;
+
+	// Host static time expectation: address mapping, setkernel
+	const double host_addressmap_latency = HOST_ADDRESSMAP_LATENCY;
+	double host_total_addressmap_latency = host_addressmap_latency*(host_iteration+1);
+	const double host_setkernel_latency = HOST_SETKERNEL_LATENCY;
+	double host_total_setkernel_latency = host_setkernel_latency*(host_iteration+1);
+
+	// Host dynamic time expectation: CreateBuffer
+	size_t user_lastdatabase_size = user_database_size - host_iteration*UNIT_DATABASE_SIZE*2;
+
+	double host_createbuffer_latency = 0;
+	if(user_lastdatabase_size <= SMARTSSD_DATABASE_SIZE_STD_4)
+		host_createbuffer_latency = HOST_CREATEBUF_LATENCY_4;
+	else if(user_lastdatabase_size > SMARTSSD_DATABASE_SIZE_STD_4 && user_lastdatabase_size <= SMARTSSD_DATABASE_SIZE_STD_3)
+		host_createbuffer_latency = HOST_CREATEBUF_LATENCY_4*user_lastdatabase_size/SMARTSSD_DATABASE_SIZE_STD_4;
+	else if(user_lastdatabase_size > SMARTSSD_DATABASE_SIZE_STD_3 && user_lastdatabase_size <= SMARTSSD_DATABASE_SIZE_STD_2)
+		host_createbuffer_latency = HOST_CREATEBUF_LATENCY_3*user_lastdatabase_size/SMARTSSD_DATABASE_SIZE_STD_3;
+	else if(user_lastdatabase_size > SMARTSSD_DATABASE_SIZE_STD_2 && user_lastdatabase_size <= SMARTSSD_DATABASE_SIZE_STD_1)
+		host_createbuffer_latency = HOST_CREATEBUF_LATENCY_2*user_lastdatabase_size/SMARTSSD_DATABASE_SIZE_STD_2;
+	else if(user_lastdatabase_size > SMARTSSD_DATABASE_SIZE_STD_1 && user_lastdatabase_size <= SMARTSSD_DATABASE_SIZE_STD_0)
+		host_createbuffer_latency = HOST_CREATEBUF_LATENCY_1*user_lastdatabase_size/SMARTSSD_DATABASE_SIZE_STD_1;		
+	else
+		host_createbuffer_latency = HOST_CREATEBUF_LATENCY_0*user_lastdatabase_size/SMARTSSD_DATABASE_SIZE_STD_0;
+
+	double host_total_createbuffer_latency = (host_iteration)*HOST_CREATEBUF_LATENCY_0*UNIT_DATABASE_SIZE*2/SMARTSSD_DATABASE_SIZE_STD_0;
+	for(int i=0; i<host_iteration+1; i++) {
+		if(i==host_iteration && host_iteration!=0)
+			host_total_createbuffer_latency = host_total_createbuffer_latency + host_createbuffer_latency + 100;
+		else if(i==host_iteration && host_iteration==0)
+			host_total_createbuffer_latency = host_total_createbuffer_latency + host_createbuffer_latency;
+		else
+			host_total_createbuffer_latency = host_total_createbuffer_latency + 100;
+	}
+
+	// Data transfer time (SSD2FPGA) time expectation
+	double user_ssd2fpga_effbw;
+	if(user_lastdatabase_size <= SMARTSSD_DATABASE_SIZE_STD_4)
+		user_ssd2fpga_effbw = SMARTSSD_SSD2FPGA_EFFBW_4;
+	else if(user_lastdatabase_size > SMARTSSD_DATABASE_SIZE_STD_4 && user_lastdatabase_size <= SMARTSSD_DATABASE_SIZE_STD_3)
+		user_ssd2fpga_effbw = SMARTSSD_SSD2FPGA_EFFBW_4*user_lastdatabase_size/SMARTSSD_DATABASE_SIZE_STD_4;
+	else if(user_lastdatabase_size > SMARTSSD_DATABASE_SIZE_STD_3 && user_lastdatabase_size <= SMARTSSD_DATABASE_SIZE_STD_2)
+		user_ssd2fpga_effbw = SMARTSSD_SSD2FPGA_EFFBW_3*user_lastdatabase_size/SMARTSSD_DATABASE_SIZE_STD_3;
+	else if(user_lastdatabase_size > SMARTSSD_DATABASE_SIZE_STD_2 && user_lastdatabase_size <= SMARTSSD_DATABASE_SIZE_STD_1)
+		user_ssd2fpga_effbw = SMARTSSD_SSD2FPGA_EFFBW_2*user_lastdatabase_size/SMARTSSD_DATABASE_SIZE_STD_2;
+	else if(user_lastdatabase_size > SMARTSSD_DATABASE_SIZE_STD_1 && user_lastdatabase_size <= SMARTSSD_DATABASE_SIZE_STD_0)
+		user_ssd2fpga_effbw = SMARTSSD_SSD2FPGA_EFFBW_1*user_lastdatabase_size/SMARTSSD_DATABASE_SIZE_STD_1;
+	else
+		user_ssd2fpga_effbw = SMARTSSD_SSD2FPGA_EFFBW_0;
+
+	double host_total_ssd2fpga_latency = 0;
+	for(int i=0; i<host_iteration+1; i++) {
+		if(i==host_iteration)
+			host_total_ssd2fpga_latency = host_total_ssd2fpga_latency +	(user_lastdatabase_size/user_ssd2fpga_effbw)*1000;
+		else
+			host_total_ssd2fpga_latency = host_total_ssd2fpga_latency + ((double)UNIT_DATABASE_SIZE*2/SMARTSSD_SSD2FPGA_EFFBW_0)*1000;
+	}
+	
+	// Data transfer time (HOST2FPGA) time expectation
+	size_t user_outbuffer_size;
+	if(user_query == Q3 || user_query == Q4 || user_query == Q7 || user_query == Q8)
+		user_outbuffer_size = 4096;
+	else
+		user_outbuffer_size = (user_pagenum-host_iteration*131072*2)*4096/2;
+
+	double user_fpga2host_effbw;
+	if(user_outbuffer_size <= SMARTSSD_OUTBUF_SIZE_STD_1)
+		user_fpga2host_effbw = SMARTSSD_FPGA2HOST_EFFBW_1;
+	else if(user_outbuffer_size > SMARTSSD_OUTBUF_SIZE_STD_1 && user_outbuffer_size <= SMARTSSD_OUTBUF_SIZE_STD_0)
+		user_fpga2host_effbw = SMARTSSD_FPGA2HOST_EFFBW_1*user_outbuffer_size/SMARTSSD_OUTBUF_SIZE_STD_1;
+	else
+		user_fpga2host_effbw = SMARTSSD_FPGA2HOST_EFFBW_0;
+
+	double host_total_fpga2host_latency = 0;
+	if(user_query == Q3 || user_query == Q4 || user_query == Q7 || user_query == Q8) {
+		for(int i=0; i<host_iteration+1; i++) {
+			host_total_fpga2host_latency = host_total_fpga2host_latency + (user_outbuffer_size/user_fpga2host_effbw)*1000;
+		}
+	}
+	else {
+		for(int i=0; i<host_iteration+1; i++) {
+			if(i==host_iteration)
+				host_total_fpga2host_latency = host_total_fpga2host_latency + (user_outbuffer_size/user_fpga2host_effbw)*1000;
+			else
+				host_total_fpga2host_latency = host_total_fpga2host_latency + ((131072*4096)/SMARTSSD_FPGA2HOST_EFFBW_0)*1000;
+		}
+	}
+
+	// Kernel compute time expectation
+	size_t user_unit_com_cycle = 0;
+	size_t user_unit_dma_cycle = 0;
+	
+	if (user_dataset == HIGGS){
+		switch (user_query_num){
+			case (Q1):
+				user_unit_com_cycle = 5522;
+				user_unit_dma_cycle = 703;
+				break;
+			case (Q2):
+				user_unit_com_cycle = 5522;
+				user_unit_dma_cycle = 703;
+				break;
+			case (Q3):
+				user_unit_com_cycle = 5582;
+				user_unit_dma_cycle = 518;
+				break;
+			case (Q4):
+				user_unit_com_cycle = 5582;
+				user_unit_dma_cycle = 518;
+				break;
+			case (Q5):
+				user_unit_com_cycle = 5552;
+				user_unit_dma_cycle = 701;
+				break;
+			case (Q6):
+				user_unit_com_cycle = 5552;
+				user_unit_dma_cycle = 701;
+				break;
+			case (Q7):
+				user_unit_com_cycle = 5612;
+				user_unit_dma_cycle = 521;
+				break;
+			case (Q8):
+				user_unit_com_cycle = 5612;
+				user_unit_dma_cycle = 521;
+				break;
+			case (Q9):
+				user_unit_com_cycle = 5522;
+				user_unit_dma_cycle = 703;
+				break;
+			case (Q10):
+				user_unit_com_cycle = 28048;
+				user_unit_dma_cycle = 5766;
+				break;
+			case (Q11):
+				user_unit_com_cycle = 4591;
+				user_unit_dma_cycle = 5534;
+				break;
+			default:
+				printf("undifined query\n");
+		}
+	} else if (user_dataset == FOREST){
+		switch (user_query_num){
+			case (Q1):
+				user_unit_com_cycle = 5215;
+				user_unit_dma_cycle = 785;
+				break;
+			case (Q2):
+				user_unit_com_cycle = 5215;
+				user_unit_dma_cycle = 778503;
+				break;
+			case (Q3):
+				user_unit_com_cycle = 5308;
+				user_unit_dma_cycle = 527;
+				break;
+			case (Q4):
+				user_unit_com_cycle = 5308;
+				user_unit_dma_cycle = 527;
+				break;
+			case (Q5):
+				user_unit_com_cycle = 5244;
+				user_unit_dma_cycle = 782;
+				break;
+			case (Q6):
+				user_unit_com_cycle = 5244;
+				user_unit_dma_cycle = 782;
+				break;
+			case (Q7):
+				user_unit_com_cycle = 5338;
+				user_unit_dma_cycle = 535;
+				break;
+			case (Q8):
+				user_unit_com_cycle = 5338;
+				user_unit_dma_cycle = 535;
+				break;
+			case (Q9):
+				user_unit_com_cycle = 5215;
+				user_unit_dma_cycle = 785;
+				break;
+			case (Q10):
+				user_unit_com_cycle = 14651;
+				user_unit_dma_cycle = 5685;
+				break;
+			case (Q11):
+				user_unit_com_cycle = 2903;
+				user_unit_dma_cycle = 5500;
+				break;
+			default:
+				printf("undifined query\n");
+		}
+	} else if (user_dataset == WILT){
+		switch (user_query_num){
+			case (Q1):
+				user_unit_com_cycle = 5087;
+				user_unit_dma_cycle = 884;
+				break;
+			case (Q2):
+				user_unit_com_cycle = 5087;
+				user_unit_dma_cycle = 884;
+				break;
+			case (Q3):
+				user_unit_com_cycle = 5238;
+				user_unit_dma_cycle = 536;
+				break;
+			case (Q4):
+				user_unit_com_cycle = 5238;
+				user_unit_dma_cycle = 536;
+				break;
+			case (Q5):
+				user_unit_com_cycle = 5117;
+				user_unit_dma_cycle = 882;
+				break;
+			case (Q6):
+				user_unit_com_cycle = 5117;
+				user_unit_dma_cycle = 882;
+				break;
+			case (Q7):
+				user_unit_com_cycle = 5268;
+				user_unit_dma_cycle = 534;
+				break;
+			case (Q8):
+				user_unit_com_cycle = 5268;
+				user_unit_dma_cycle = 534;
+				break;
+			case (Q9):
+				user_unit_com_cycle = 5087;
+				user_unit_dma_cycle = 882;
+				break;
+			case (Q10):
+				user_unit_com_cycle = 7785;
+				user_unit_dma_cycle = 5864;
+				break;
+			case (Q11):
+				user_unit_com_cycle = 4512;
+				user_unit_dma_cycle = 5623;
+				break;
+			default:
+				printf("undifined query\n");
+		}
+	} else if (user_dataset == HABERMAN){
+		switch (user_query_num){
+			case (Q1):
+				user_unit_com_cycle = 4335;
+				user_unit_dma_cycle = 980;
+				break;
+			case (Q2):
+				user_unit_com_cycle = 4335;
+				user_unit_dma_cycle = 980;
+				break;
+			case (Q3):
+				user_unit_com_cycle = 4507;
+				user_unit_dma_cycle = 533;
+				break;
+			case (Q4):
+				user_unit_com_cycle = 4507;
+				user_unit_dma_cycle = 533;
+				break;
+			case (Q5):
+				user_unit_com_cycle = 4365;
+				user_unit_dma_cycle = 949;
+				break;
+			case (Q6):
+				user_unit_com_cycle = 4365;
+				user_unit_dma_cycle = 949;
+				break;
+			case (Q7):
+				user_unit_com_cycle = 4537;
+				user_unit_dma_cycle = 534;
+				break;
+			case (Q8):
+				user_unit_com_cycle = 4537;
+				user_unit_dma_cycle = 534;
+				break;
+			case (Q9):
+				user_unit_com_cycle = 4335;
+				user_unit_dma_cycle = 979;
+				break;
+			case (Q10):
+				user_unit_com_cycle = 4019;
+				user_unit_dma_cycle = 5356;
+				break;
+			case (Q11):
+				user_unit_com_cycle = 4153;
+				user_unit_dma_cycle = 5050;
+				break;
+			default:
+				printf("undifined query\n");
+		}
+	} else{
+		printf("undifined dataset\n");
+	}
+
+	const size_t user_clock = USER_CLOCK;
+
+	size_t user_total_com_cycle = 0;
+	for(int i=0; i<host_iteration+1; i++) {
+		if(i==host_iteration)
+			user_total_com_cycle = user_total_com_cycle + user_unit_com_cycle*page_iteration;
+		else
+			user_total_com_cycle = user_total_com_cycle + user_unit_com_cycle*((long long)UNIT_DATABASE_SIZE*2)/PAGE_SIZE;
+	}
+
+	size_t user_total_dma_cycle = 0;
+	if(user_query==Q3||user_query==Q4||user_query==Q7||user_query==Q8)
+		user_total_dma_cycle = (host_iteration+1)*user_unit_dma_cycle;
+	else {
+		for(int i=0; i<host_iteration+1; i++) {
+			if(i==host_iteration)
+				user_total_dma_cycle = user_total_dma_cycle + user_unit_dma_cycle*page_iteration;
+			else
+				user_total_dma_cycle = user_total_dma_cycle + user_unit_dma_cycle*((long long)UNIT_DATABASE_SIZE*2)/PAGE_SIZE;
+		}
+	}
+
+	size_t user_effective_com_cycle = user_total_com_cycle/user_corenum;
+	size_t user_effective_dma_cycle = user_total_dma_cycle/user_corenum;
+
+	double user_total_com_latency = ((double)user_effective_com_cycle/((double)user_clock*1000000))*1000;					
+	double user_total_dma_latency  = ((double)user_effective_dma_cycle/((double)user_clock*1000000))*1000;
+	double user_total_kernel_latency = user_total_com_latency + user_total_dma_latency;
+
+	double user_kernel_overhead_latency = user_total_kernel_latency*0.041;
+
+	double user_total_latency = host_total_createbuffer_latency+host_total_addressmap_latency+host_total_ssd2fpga_latency+host_total_setkernel_latency+user_total_kernel_latency+user_kernel_overhead_latency+host_total_fpga2host_latency;
+
+	return user_total_latency;
 }
 
 static void
@@ -1645,6 +2256,9 @@ sw_stack_for_hw(const char* query_string, List* querytrees){
 	// hw support operation
 	if (op_info.hw_support){
 		printf("hw supported\n");
+		op_info.hw_query_num = get_query_num(op_info);
+		query_num_recorded = true;
+		query_num = op_info.hw_query_num;
 		// get oids and size of data and model table
 		char* data_model_query = (char*)malloc(sizeof(char) * (20 + strlen(op_info.data_table_name) + strlen(op_info.model_table_name)));
 		hw_query_modification(op_info.data_table_name, op_info.model_table_name, data_model_query);
@@ -1667,13 +2281,13 @@ sw_stack_for_hw(const char* query_string, List* querytrees){
 		int* rtable_colnum;
 		unsigned long long int* rtable_colsel;
 		char*** rtable_colname;
-		int query_num = 0;
+		int query_num_local = 0;
 		int* table_size;
 		// 0th: data table, 1th: data table
 		ListCell* query_list;
 		foreach(query_list, data_model_querytree_list) {
 			Query* query = lfirst_node(Query, query_list);
-			query_num++;
+			query_num_local++;
 			rtable_num = list_length(query->rtable);
 			rtable_id = (int*)malloc(sizeof(int) * rtable_num);
 			rtable_relid = (int*)malloc(sizeof(int) * rtable_num);
@@ -1808,28 +2422,54 @@ sw_stack_for_hw(const char* query_string, List* querytrees){
 
 		// Predictor
 		// Cost approx function
-		// Check for data table 
-		printf("check table size ------------------- %d\n", table_size[0]);
+		double page_num;
+		double new_data_num = get_data_num(rtable_relid[0], table_size[0], &page_num);
+		printf("Extracted data num: %f\n", new_data_num);
+		num_rows_recorded = true;
+		num_rows = new_data_num;
 
-		//double new_data_num = 
-		//double new_exec_time = 
-		
-		/*
-		// cost prediction if needed
-		double new_exec_time_predict;
-		if (new_data_num_predict <= data_num2[0]){
-			new_exec_time_predict = polyval(new_data_num, exec_coef1);
-		} else if (new_data_num_predict <= data_num3[0]){
-			new_exec_time_predict = polyval(new_data_num, exec_coef2);
-		} else{
-			new_exec_time_predict = polyval(new_data_num, exec_coef3);
+		double new_exec_time_predict = 0;
+		double new_data_num_predict = new_data_num / 1000;
+		if (USE_ADAPTIVE_RANGE){
+			if ((data1_len[query_num] > ADJ_MIN_DATANUM) & (data2_len[query_num] > ADJ_MIN_DATANUM) & (data3_len[query_num] > ADJ_MIN_DATANUM)){
+				printf("\t-------HW predictor debugging-------\n\t");
+				// CPU COST APPROXIMATION
+				if (new_data_num_predict <= data_num2[query_num][0]){
+					new_exec_time_predict = polyval(new_data_num_predict, exec_coef1[query_num]);
+				} else if (new_data_num_predict <= data_num3[query_num][0]){
+					new_exec_time_predict = polyval(new_data_num_predict, exec_coef2[query_num]);
+				} else{
+					new_exec_time_predict = polyval(new_data_num_predict, exec_coef3[query_num]);
+				}	
+				printf("CPU cost prediction result [datanum: %f -> prediction time: %.3f (ms)]\n\t", new_data_num, new_exec_time_predict);
+
+				// HW COST APPROXIMATION
+				int dataset_num = -1;
+				if (op_info.data_col_len > 17){ // HIGGS
+					dataset_num = HIGGS;
+				} else if (op_info.data_col_len > 8){ // FOREST
+					dataset_num = FOREST;
+				} else if (op_info.data_col_len > 4){ // WILT
+					dataset_num = WILT;
+				} else{ // HABERMAN
+					dataset_num = HABERMAN;
+				}
+
+				double hw_expectation_time = get_hw_expectation_time(query_num, dataset_num, page_num);
+				printf("HW cost prediction result [datanum(%s): %f -> prediction time: %.3f (ms)]\n\t", new_data_num, 
+													(dataset_num == HIGGS) ? ("HIGGS") : ((dataset_num == FOREST) ? ("FOREST") : ((dataset_num == WILT) ? ("WILT") : 
+													(dataset_num == HABERMAN) ? ("HABERMAN") : ("ERROR"))), hw_expectation_time);
+				
+				if (new_exec_time_predict < hw_expectation_time){
+					printf("CPU time is %.3f times faster -> use CPU (CPU/HW ratio = %.3f)\n\t", hw_expectation_time/new_exec_time_predict, new_exec_time_predict/hw_expectation_time);
+				} else{
+					printf("HW time is %.3f times faster -> use HW (CPU/HW ratio = %.3f)\n\t", new_exec_time_predict/hw_expectation_time, new_exec_time_predict/hw_expectation_time);
+				}
+				printf("--------------------------------------\n");
+			} else{
+				printf("CPU cost prediction -> not enough data gathered\n");
+			}
 		}
-
-		// add to data if needed
-		add_new_data(&data_num1, &data_num2,  &data_num3, &q1_exec_time1, &q1_exec_time2, &q1_exec_time3,
-                 	 &data1_len, &data2_len, &data3_len, &exec_coef1, &exec_coef2,  &exec_coef3,
-                 	new_data_num, new_exec_time);
-		*/
 
 		free_operation_info(&op_info);
 		free(rtable_id);
@@ -1853,6 +2493,8 @@ sw_stack_for_hw(const char* query_string, List* querytrees){
 		return;
 	}
 }
+
+// adaptive range functionality
 
 int polyfit(int pointCount, double *xValues, double *yValues, int coefficientCount, double *coefficientResults){
 
@@ -1977,8 +2619,9 @@ double *polyval_multi(double* data_num, double* exec_time, int data_len, double*
 
 double polyval(double new_data, double* exec_coef){
     double result = 0;
-    double now_data = 0; 
+    double now_data = new_data; 
     double partial_mul = 0;
+    
     for (int j = EXEC_ORDER ; j >= 0 ; j--){ // 3 2 1 0
         partial_mul = 1;
         for (int k = 0 ; k < j ; k++){
@@ -2051,9 +2694,9 @@ static matrix_t *createMatrix(int rows, int cols){
 
 void print_data(double* data, int data_len){
     for (int i = 0 ; i < data_len ; i++){
-        if ((i % 10 == 0) & (i != 0)){
+        /*if ((i % 10 == 0) & (i != 0)){
             printf("\n");
-        }
+        }*/
         printf("%lf ", data[i]);
     }
     printf("\n");
@@ -2140,7 +2783,7 @@ int adjust_range(double* data_num1, double* data_num2, double* exec_time1, doubl
     double right_error_rate;
 
     // phase 1 (left moving phase)
-    printf("Phase 1\n");
+    //printf("Phase 1\n");
     double min_left_error_1 = def_left_error;
     double min_right_error_1 = def_right_error;
     double min_left_error_rate_1 = def_left_error_rate;
@@ -2199,8 +2842,8 @@ int adjust_range(double* data_num1, double* data_num2, double* exec_time1, doubl
         //printf("[left] error_rate: %lf [right] error_rate: %lf\n", left_error_rate, right_error_rate);
 
         if ((left_error_rate < min_left_error_rate_1) & (right_error_rate < min_right_error_rate_1)){
-            printf("case 1\n");
-            printf("updated to %lf, %lf\n", left_error_rate, right_error_rate);
+            //printf("case 1\n");
+            //printf("updated to %lf, %lf\n", left_error_rate, right_error_rate);
             min_left_error_1 = left_error;
             min_right_error_1 = right_error;
             min_left_error_rate_1 = left_error_rate;
@@ -2212,8 +2855,8 @@ int adjust_range(double* data_num1, double* data_num2, double* exec_time1, doubl
             min_left_len_1 = left_len_1;
             min_right_len_1 = right_len_1;
         } else if ((left_error_rate > min_left_error_rate_1) & (right_error_rate > min_right_error_rate_1)){
-            printf("case 2\n");
-            printf("break\n");
+            //printf("case 2\n");
+            //printf("break\n");
             // Roll back 
             for (int right_delete = right_len_1 ; right_delete >= 1 ; right_delete--){
                 min_right_data_num_1[right_delete] = min_right_data_num_1[right_delete - 1];
@@ -2230,11 +2873,11 @@ int adjust_range(double* data_num1, double* data_num2, double* exec_time1, doubl
             break;
         } else{
             if ((left_error_rate < min_left_error_rate_1) & (right_error_rate > min_right_error_rate_1)){
-                printf("case 3_1\n");
+                //printf("case 3_1\n");
                 double left_improved = min_left_error_rate_1 - left_error_rate;
                 double right_worsed = right_error_rate - min_right_error_rate_1;
                 if (left_improved > right_worsed){
-                    printf("updated to %lf, %lf\n", left_error_rate, right_error_rate);
+                    //printf("updated to %lf, %lf\n", left_error_rate, right_error_rate);
                     min_left_error_1 = left_error;
                     min_right_error_1 = right_error;
                     min_left_error_rate_1 = left_error_rate;
@@ -2246,7 +2889,7 @@ int adjust_range(double* data_num1, double* data_num2, double* exec_time1, doubl
                     min_left_len_1 = left_len_1;
                     min_right_len_1 = right_len_1;
                 } else{
-                    printf("break\n");
+                    //printf("break\n");
                     // Roll back 
                     for (int right_delete = right_len_1 ; right_delete >= 1 ; right_delete--){
                         min_right_data_num_1[right_delete] = min_right_data_num_1[right_delete - 1];
@@ -2263,11 +2906,11 @@ int adjust_range(double* data_num1, double* data_num2, double* exec_time1, doubl
                     break;
                 }
             } else{
-                printf("case 3_2\n");
+                //printf("case 3_2\n");
                 double left_worsed = left_error_rate - min_left_error_rate_1;
                 double right_improved = min_right_error_rate_1 - right_error_rate;
                 if (right_improved > left_worsed){
-                    printf("updated to %lf, %lf\n", left_error_rate, right_error_rate);
+                    //printf("updated to %lf, %lf\n", left_error_rate, right_error_rate);
                     min_left_error_1 = left_error;
                     min_right_error_1 = right_error;
                     min_left_error_rate_1 = left_error_rate;
@@ -2279,7 +2922,7 @@ int adjust_range(double* data_num1, double* data_num2, double* exec_time1, doubl
                     min_left_len_1 = left_len_1;
                     min_right_len_1 = right_len_1;
                 } else{
-                    printf("break\n");
+                    //printf("break\n");
                     // Roll back 
                     for (int right_delete = right_len_1 ; right_delete >= 1 ; right_delete--){
                         min_right_data_num_1[right_delete] = min_right_data_num_1[right_delete - 1];
@@ -2298,7 +2941,7 @@ int adjust_range(double* data_num1, double* data_num2, double* exec_time1, doubl
             }
         }   
         if ((min_left_error_rate_1 < 5) | (min_right_error_rate_1 < 5)){
-            printf("small enough - break\n");
+            //printf("small enough - break\n");
             // Roll back 
             for (int right_delete = right_len_1 ; right_delete >= 1 ; right_delete--){
                 min_right_data_num_1[right_delete] = min_right_data_num_1[right_delete - 1];
@@ -2315,7 +2958,7 @@ int adjust_range(double* data_num1, double* data_num2, double* exec_time1, doubl
             break;
         }
         if ((min_left_len_1 < 4) | (min_right_len_1 < 4)){
-            printf("too small data for range - break\n");
+            //printf("too small data for range - break\n");
             // Roll back 
             for (int right_delete = right_len_1 ; right_delete >= 1 ; right_delete--){
                 min_right_data_num_1[right_delete] = min_right_data_num_1[right_delete - 1];
@@ -2347,7 +2990,7 @@ int adjust_range(double* data_num1, double* data_num2, double* exec_time1, doubl
     //print_data(min_right_data_num_1, min_right_len_1);
 
     // phase 1 (right moving phase)
-    printf("Phase 2\n");
+    //printf("Phase 2\n");
     double min_left_error_2 = def_left_error;
     double min_right_error_2 = def_right_error;
     double min_left_error_rate_2 = def_left_error_rate;
@@ -2407,8 +3050,8 @@ int adjust_range(double* data_num1, double* data_num2, double* exec_time1, doubl
         //printf("[left] error_rate: %lf [right] error_rate: %lf\n", left_error_rate, right_error_rate);
 
         if ((left_error_rate < min_left_error_rate_2) & (right_error_rate < min_right_error_rate_2)){
-            printf("case 1\n");
-            printf("updated to %lf, %lf\n", left_error_rate, right_error_rate);
+            //printf("case 1\n");
+            //printf("updated to %lf, %lf\n", left_error_rate, right_error_rate);
             min_left_error_2 = left_error;
             min_right_error_2 = right_error;
             min_left_error_rate_2 = left_error_rate;
@@ -2420,8 +3063,8 @@ int adjust_range(double* data_num1, double* data_num2, double* exec_time1, doubl
             min_left_len_2 = left_len_2;
             min_right_len_2 = right_len_2;
         } else if ((left_error_rate > min_left_error_rate_2) & (right_error_rate > min_right_error_rate_2)){
-            printf("case 2\n");
-            printf("break\n");
+            //printf("case 2\n");
+            //printf("break\n");
             // Roll back 
             min_left_data_num_2[left_len_2] = min_right_data_num_2[1];
             min_left_exec_time_2[left_len_2] = min_right_exec_time_2[1];
@@ -2438,11 +3081,11 @@ int adjust_range(double* data_num1, double* data_num2, double* exec_time1, doubl
             break;
         } else{
             if ((left_error_rate < min_left_error_rate_2) & (right_error_rate > min_right_error_rate_2)){
-                printf("case 3_1\n");
+                //printf("case 3_1\n");
                 double left_improved = min_left_error_rate_2 - left_error_rate;
                 double right_worsed = right_error_rate - min_right_error_rate_2;
                 if (left_improved > right_worsed){
-                    printf("updated to %lf, %lf\n", left_error_rate, right_error_rate);
+                    //printf("updated to %lf, %lf\n", left_error_rate, right_error_rate);
                     min_left_error_2 = left_error;
                     min_right_error_2 = right_error;
                     min_left_error_rate_2 = left_error_rate;
@@ -2454,7 +3097,7 @@ int adjust_range(double* data_num1, double* data_num2, double* exec_time1, doubl
                     min_left_len_2 = left_len_2;
                     min_right_len_2 = right_len_2;
                 } else{
-                    printf("break\n");
+                    //printf("break\n");
                     // Roll back 
                     min_left_data_num_2[left_len_2] = min_right_data_num_2[1];
                     min_left_exec_time_2[left_len_2] = min_right_exec_time_2[1];
@@ -2471,11 +3114,11 @@ int adjust_range(double* data_num1, double* data_num2, double* exec_time1, doubl
                     break;
                 }
             } else{
-                printf("case 3_2\n");
+                //printf("case 3_2\n");
                 double left_worsed = left_error_rate - min_left_error_rate_2;
                 double right_improved = min_right_error_rate_2 - right_error_rate;
                 if (right_improved > left_worsed){
-                    printf("updated to %lf, %lf\n", left_error_rate, right_error_rate);
+                    //printf("updated to %lf, %lf\n", left_error_rate, right_error_rate);
                     min_left_error_2 = left_error;
                     min_right_error_2 = right_error;
                     min_left_error_rate_2 = left_error_rate;
@@ -2487,7 +3130,7 @@ int adjust_range(double* data_num1, double* data_num2, double* exec_time1, doubl
                     min_left_len_2 = left_len_2;
                     min_right_len_2 = right_len_2;
                 } else{
-                    printf("break\n");
+                    //printf("break\n");
                     // Roll back 
                     min_left_data_num_2[left_len_2] = min_right_data_num_2[1];
                     min_left_exec_time_2[left_len_2] = min_right_exec_time_2[1];
@@ -2506,7 +3149,7 @@ int adjust_range(double* data_num1, double* data_num2, double* exec_time1, doubl
             }
         }   
         if ((min_left_error_rate_1 < 5) | (min_right_error_rate_1 < 5)){
-            printf("small enough - break\n");
+            //printf("small enough - break\n");
             // Roll back 
             min_left_data_num_2[left_len_2] = min_right_data_num_2[1];
             min_left_exec_time_2[left_len_2] = min_right_exec_time_2[1];
@@ -2523,7 +3166,7 @@ int adjust_range(double* data_num1, double* data_num2, double* exec_time1, doubl
             break;
         }
         if ((min_left_len_1 < 4) | (min_right_len_1 < 4)){
-            printf("too small data for range - break\n");
+            //printf("too small data for range - break\n");
             // Roll back 
             min_left_data_num_2[left_len_2] = min_right_data_num_2[1];
             min_left_exec_time_2[left_len_2] = min_right_exec_time_2[1];
@@ -2554,19 +3197,19 @@ int adjust_range(double* data_num1, double* data_num2, double* exec_time1, doubl
     //print_data(min_left_data_num_2, min_left_len_2);
     //print_data(min_right_data_num_2, min_right_len_2);
 
-    print_data(min_left_data_num_1, min_left_len_1);
-    print_data(min_right_data_num_1, min_right_len_1);
+    //print_data(min_left_data_num_1, min_left_len_1);
+    //print_data(min_right_data_num_1, min_right_len_1);
 
     if (min_left_error_rate_1 + min_right_error_rate_1 < min_left_error_rate_2 + min_right_error_rate_2){
         printf("Final result: %lf, %lf / boundary: %lf\n", min_left_error_rate_1, min_right_error_rate_1, min_right_data_num_1[0]);
-        for (int x = 0 ; x < EXEC_ORDER + 1 ; x++){
+        /*for (int x = 0 ; x < EXEC_ORDER + 1 ; x++){
             printf("%e ", min_left_coef_1[x]);
         }
         printf("\n");
         for (int y = 0 ; y < EXEC_ORDER + 1 ; y++){
             printf("%e ", min_right_coef_1[y]);
         }
-        printf("\n");
+        printf("\n");*/
         *min_left_data_num = min_left_data_num_1;
         *min_right_data_num = min_right_data_num_1;
         *min_left_exec_time = min_left_exec_time_1;
@@ -2583,14 +3226,14 @@ int adjust_range(double* data_num1, double* data_num2, double* exec_time1, doubl
         free(min_right_coef_2);
     } else{
         printf("Final result: %lf, %lf / boundary: %lf\n", min_left_error_rate_2, min_right_error_rate_2, min_right_data_num_2[0]);
-        for (int x = 0 ; x < EXEC_ORDER + 1 ; x++){
+        /*for (int x = 0 ; x < EXEC_ORDER + 1 ; x++){
             printf("%e ", min_left_coef_2[x]);
         }
         printf("\n");
         for (int y = 0 ; y < EXEC_ORDER + 1 ; y++){
             printf("%e ", min_right_coef_2[y]);
         }
-        printf("\n");
+        printf("\n");*/
         *min_left_data_num = min_left_data_num_2;
         *min_right_data_num = min_right_data_num_2;
         *min_left_exec_time = min_left_exec_time_2;
@@ -2610,50 +3253,210 @@ int adjust_range(double* data_num1, double* data_num2, double* exec_time1, doubl
     return 0;
 }
 
-
-void get_init_values(double** num1, double** num2, double** num3, 
-                     double** exec_time1, double** exec_time2, double** exec_time3,
-                     int* len1, int* len2, int* len3){
+void get_init_values(double*** num1, double*** num2, double*** num3, 
+                     double*** exec_time1_out, double*** exec_time2_out, double*** exec_time3_out,
+                     int** len1, int** len2, int** len3){
                          
-    int data1_len = 15;
-    int data2_len = 13;
-    int data3_len = 18;
+    int data1_len_saved = 15;
+    int data2_len_saved = 13;
+    int data3_len_saved = 18;
 
     double data_num1_saved[] = {1.5, 2.5, 6.5, 14, 15, 25, 30, 50, 65, 130, 140, 280, 300, 500, 1300};
     double data_num2_saved[] = {1300, 2800, 3000, 5000, 13000, 15000, 25000, 28000, 33000, 55000, 65000, 75000, 125000};
     double data_num3_saved[] = {125000, 130000, 143000, 150000, 225000, 250000, 308000, 325000, 330000, 375000, 550000, 650000, 700000, 975000, 1400000, 1430000, 2100000, 3080000};
-    double q1_exec_time1_saved[] = {5.009, 11.191, 7.748 , 16.792 , 28.235 , 30.145 , 38.956 , 41.345 , 35.973 , 52.418 , 45.241 , 72.999 , 209.909 , 240.505, 365.524};
+    
+    double q1_exec_time1_saved[] = {5.009, 11.191, 7.748, 16.792, 28.235, 30.145, 38.956, 41.345, 35.973, 52.418, 45.241, 72.999, 209.909, 240.505, 365.524};
+    double q2_exec_time1_saved[] = {9.35, 11.292, 12.841, 13.251, 20.488, 26.042, 27.193, 35.864, 30.417, 46.946, 33.15, 54.163, 139.75, 193.902, 305.527};
+    double q3_exec_time1_saved[] = {7.403, 8.965, 14.224, 15.928, 27.692, 29.636, 0.784, 40.371, 35.787, 56.302, 45.382, 72.221, 220.958, 327.824, 405.367};
+    double q4_exec_time1_saved[] = {17.894, 12.516, 12.863, 13.896, 21.687, 25.323, 28.148, 34.996, 32.996, 48.222, 36.216, 52.933, 144.889, 265.951, 330.051};
+    double q5_exec_time1_saved[] = {12.797, 11.42, 12.91, 15.846, 28.189, 33.896, 43.234, 46.022, 39.047, 55.375, 46.382, 75.878, 277.066, 326.803, 421.25};
+    double q6_exec_time1_saved[] = {10.161, 10.688, 12.009, 13.49, 22.58, 26.02, 33.045, 40.856, 33.935, 52.943, 34.686, 61.955, 174.466, 239.625, 356.558};
+    double q7_exec_time1_saved[] = {12.207, 13.605, 14.461, 16.98, 33.153, 33.544, 46.006, 46.649, 36.199, 59.511, 47.827, 81.501, 284.85, 327.834, 456.841};
+    double q8_exec_time1_saved[] = {5.164, 12.622, 7.569, 13.963, 21.629, 26.906, 33.316, 40.492, 32.828, 54.775, 36.015, 59.572, 187.089, 271.938, 390.979};
+    double q9_exec_time1_saved[] = {81.173, 78.342, 74.583, 76.848, 89.299, 92.651, 110.814, 111.765, 101.522, 124.612, 115.361, 152.165, 439.068, 496.864, 611.651};
+    double q10_exec_time1_saved[] = {76.744, 79.285, 92.126, 96.959, 120.581, 124.703, 175.217, 190.55, 133.223, 190.336, 159.885, 219.694, 1118.38, 1119.738, 1217.085};
+    double q11_exec_time1_saved[] = {82.316, 91.629, 85.542, 86.28, 107.702, 97.484, 116.438, 121.662, 104.085, 122.37, 110.878, 129.364, 589.264, 494.269, 539.124};
+
     double q1_exec_time2_saved[] = {365.524, 548.974, 6666.357, 7450.265, 10573.282, 11350.895, 15220.229, 16374.973, 23334.794, 25803.333, 30390.761, 48559.641, 56551.836};
-    double q1_exec_time3_saved[] = {56551.836, 54036.095, 43052.146, 61071.692, 86508.129, 94670.007, 57944.830, 89096.379, 229580.474, 133318.417, 
-                                    240975.250, 208061.190, 139562.096, 285402.931, 385307.503, 404717.703, 605279.805, 1205969.281};
+    double q2_exec_time2_saved[] = {305.527, 370.061, 6021.93246334, 6514.26459818, 8481.72458038, 8973.12457391, 11427.35590204, 12162.73070221, 14509.886, 20321.73, 21199.06336971, 30649.077, 46062.151};
+    double q3_exec_time2_saved[] = {405.367, 584.49, 7216.43449593, 8025.49679421, 11249.47676199, 12052.41687257, 16048.912387, 17241.97468969, 24134.952, 29738.307, 31736.86129067, 50551.571, 61687.493};
+    double q4_exec_time2_saved[] = {330.051, 400.493, 6597.10549806, 7109.06105127, 9155.29350517, 9666.45670223, 12219.92842243, 12985.21420294, 15849.221, 21907.723, 22395.83766147, 31569.845, 48325.145};
+    double q5_exec_time2_saved[] = {421.25, 613.809, 9864.14617857, 10846.62041209, 14758.79295158, 15732.42105622, 20574.23208211, 22018.25747001, 32271.319, 35754.92, 39509.61420881, 65646.335, 75013.658};
+    double q6_exec_time2_saved[] = {356.558, 418.147, 8935.00350494, 9539.82865238, 11955.61884908, 12558.69199287, 15568.84320857, 16470.20164238, 19916.996, 28217.732, 27523.92327023, 40260.792, 64115.814};
+    double q7_exec_time2_saved[] = {456.841, 702.726, 10815.20215599, 11841.04134743, 15927.66562521, 16945.15329738, 22007.72852185, 23518.45646139, 33953.631, 35622.5, 41850.02452749, 69992.293, 79871.8};
+    double q8_exec_time2_saved[] = {390.979, 451.671, 8778.50949406, 9439.91505461, 12079.51247548, 12737.91121821, 16020.95718528, 17002.97659032, 20564.634, 30655.974, 29006.43550846, 43267.373, 61718.12};
+    double q9_exec_time2_saved[] = {611.651, 901.701, 16873.16079022, 18331.18083296, 24140.19240713, 25586.697604, 32784.93193344, 34933.30485993, 50805.343, 52559.642, 61014.77109314, 106375.62, 119138.578};
+    double q10_exec_time2_saved[] = {1217.085, 1486.951, 34104.40485182, 38096.02330834, 53963.1758748, 57905.20692585, 77467.55188106, 83288.39550443, 131299.554, 139747.236, 153285.15724642, 282640.036, 275979.924};
+    double q11_exec_time2_saved[] = {539.124, 612.425, 13740.36693347, 15351.51686031, 21755.97804103, 23347.08718315, 31242.88076143, 33592.26880851, 48744.342, 55878.196, 61842.52693009, 113040.877, 116197.875};
 
-    double* data_num1 = (double *)malloc(sizeof(double) * DATASIZE);
-    double* data_num2 = (double *)malloc(sizeof(double) * DATASIZE);
-    double* data_num3 = (double *)malloc(sizeof(double) * DATASIZE);
-    double* q1_exec_time1 = (double *)malloc(sizeof(double) * DATASIZE);
-    double* q1_exec_time2 = (double *)malloc(sizeof(double) * DATASIZE);
-    double* q1_exec_time3 = (double *)malloc(sizeof(double) * DATASIZE);
+    double q1_exec_time3_saved[] = {56551.836, 54036.095, 43052.146, 61071.692, 86508.129, 94670.007, 57944.830, 89096.379, 229580.474, 133318.417, 240975.250, 208061.190, 139562.096, 285402.931, 385307.503, 404717.703, 605279.805, 1205969.281};
+    double q2_exec_time3_saved[] = {46062.151, 36930.7716255, 33194.21, 41736.49542082, 59622.25107331, 65539.22415667, 39115.23, 76771.871, 144551.863, 94824.56763492, 195283.74, 157911.44883953, 92798.449, 231350.64857283, 328468.50227745, 346516.425, 501269.13437175, 800323.03};
+    double q3_exec_time3_saved[] = {61687.493, 56253.37365761, 45069.838, 63564.71019344, 90068.0256174, 98597.22457359, 62449.838, 90084.871, 230095.489, 139172.33065245, 257091.821, 218708.63103929, 149521.546, 302778.41635731, 413402.38312261, 433311.225, 656418.43931735, 1302605.243};
+    double q4_exec_time3_saved[] = {48325.145, 38810.34355586, 38924.262, 43832.96942265, 62562.48563911, 68771.85370615, 41669.582, 76962.051, 149945.698, 99609.51944416, 205844.827, 166716.75043134, 100548.227, 246207.61845195, 353890.32444684, 372984.949, 552478.59096392, 910734.295};
+    double q5_exec_time3_saved[] = {75013.658, 68858.42989366, 47366.668, 77549.06833796, 108791.266591, 118752.54243, 62513.73, 95989.188, 315766.676, 165445.4473204, 314395.783, 253034.11470036, 144649.888, 339181.78300541, 445323.72966091, 470954.754, 680506.05433504, 1367070.923};
+    double q6_exec_time3_saved[] = {64115.814, 46669.51674702, 42560.047, 52493.20042447, 74065.24772427, 81166.31899731, 41905.492, 82042.596, 187861.985, 116055.71674629, 252727.297, 189820.71700739, 96630.489, 273574.92598765, 381851.58671075, 404462.286, 572297.32875584, 909565.503};
+    double q7_exec_time3_saved[] = {79871.8, 72749.59329389, 55270.125, 81935.38078833, 115103.42257276, 125729.18931245, 69447.435, 102812.695, 329552.087, 175890.00215365, 334101.326, 271699.65509181, 157916.653, 367820.24290061, 485594.940487, 513220.959, 730063.62056644, 1389510.781};
+    double q8_exec_time3_saved[] = {61718.12, 49625.49544608, 45133.391, 55854.6296957, 78757.65960457, 86238.91552716, 46049.951, 89405.264, 197538.799, 122595.35143136, 260710.662, 197509.8659916, 102993.039, 280352.63686408, 386994.02819621, 409701.388, 585069.44941168, 989253.662};
+    double q9_exec_time3_saved[] = {119138.578, 105030.30306953, 70971.661, 118127.9795205, 165469.227651, 180651.13879189, 88398.364, 152488.774, 487207.765, 252413.84648453, 486045.704, 389752.81641627, 213980.835, 527111.23345996, 692429.29846554, 733679.654, 1021928.81897446, 1882207.197};
+    double q10_exec_time3_saved[] = {275979.924, 268429.80209396, 149850.802, 301916.39666793, 419697.46880134, 456314.73992464, 145871.085, 283570.55, 1293367.083, 620865.09514693, 1330796.074, 888394.83125547, 351843.433, 1080210.9215306, 1227456.41780535, 1306695.821, 1562435.53665559, 3278640.336};
+    double q11_exec_time3_saved[] = {116197.875, 108303.79609046, 53292.176, 121811.98591795, 169302.06215946, 184056.93648885, 57931.305, 115217.056, 539001.221, 250268.27543469, 535615.678, 357110.82368786, 128568.488, 431333.44379791, 482087.57494324, 515894.317, 586774.86681101, 1187134.287};
 
-    for (int i = 0 ; i < data1_len ; i++){
-        data_num1[i] = data_num1_saved[i];
-        q1_exec_time1[i] = q1_exec_time1_saved[i];
+    int* data1_len = (int *)malloc(sizeof(int) * QUERYNUM);
+    int* data2_len = (int *)malloc(sizeof(int) * QUERYNUM);
+    int* data3_len = (int *)malloc(sizeof(int) * QUERYNUM);
+
+    double** data_num1 = (double **)malloc(sizeof(double) * QUERYNUM);
+    double** data_num2 = (double **)malloc(sizeof(double) * QUERYNUM);
+    double** data_num3 = (double **)malloc(sizeof(double) * QUERYNUM);
+    double** exec_time1 = (double **)malloc(sizeof(double) * QUERYNUM);
+    double** exec_time2 = (double **)malloc(sizeof(double) * QUERYNUM);
+    double** exec_time3 = (double **)malloc(sizeof(double) * QUERYNUM);
+
+    for (int i = 0 ; i < QUERYNUM ; i++){
+        data_num1[i] = (double *)malloc(sizeof(double) * DATASIZE);
+        data_num2[i] = (double *)malloc(sizeof(double) * DATASIZE);
+        data_num3[i] = (double *)malloc(sizeof(double) * DATASIZE);
+        exec_time1[i] = (double *)malloc(sizeof(double) * DATASIZE);
+        exec_time2[i] = (double *)malloc(sizeof(double) * DATASIZE);
+        exec_time3[i] = (double *)malloc(sizeof(double) * DATASIZE);
     }
-    for (int j = 0 ; j < data2_len ; j++){
-        data_num2[j] = data_num2_saved[j];
-        q1_exec_time2[j] = q1_exec_time2_saved[j];
+
+    for (int x = 0 ; x < QUERYNUM ; x++){
+        for (int i = 0 ; i < data1_len_saved ; i++){
+            data_num1[x][i] = data_num1_saved[i];
+            switch (x){
+                case 0:  
+                    exec_time1[x][i] = q1_exec_time1_saved[i];
+                    break;
+                case 1:
+                    exec_time1[x][i] = q2_exec_time1_saved[i];
+                    break;
+                case 2:
+                    exec_time1[x][i] = q3_exec_time1_saved[i];
+                    break;
+                case 3:
+                    exec_time1[x][i] = q4_exec_time1_saved[i];
+                    break;
+                case 4:
+                    exec_time1[x][i] = q5_exec_time1_saved[i];
+                    break;
+                case 5:
+                    exec_time1[x][i] = q6_exec_time1_saved[i];
+                    break;
+                case 6:
+                    exec_time1[x][i] = q7_exec_time1_saved[i];
+                    break;
+                case 7:
+                    exec_time1[x][i] = q8_exec_time1_saved[i];
+                    break;
+                case 8:
+                    exec_time1[x][i] = q9_exec_time1_saved[i];
+                    break;
+                case 9:
+                    exec_time1[x][i] = q10_exec_time1_saved[i];
+                    break;
+                case 10:
+                    exec_time1[x][i] = q11_exec_time1_saved[i];
+                    break;
+                default:
+                    printf("query number error\n");
+            }
+        }
+        for (int j = 0 ; j < data2_len_saved ; j++){
+            data_num2[x][j] = data_num2_saved[j];
+            switch (x){
+                case 0:  
+                    exec_time2[x][j] = q1_exec_time2_saved[j];
+                    break;
+                case 1:
+                    exec_time2[x][j] = q2_exec_time2_saved[j];
+                    break;
+                case 2:
+                    exec_time2[x][j] = q3_exec_time2_saved[j];
+                    break;
+                case 3:
+                    exec_time2[x][j] = q4_exec_time2_saved[j];
+                    break;
+                case 4:
+                    exec_time2[x][j] = q5_exec_time2_saved[j];
+                    break;
+                case 5:
+                    exec_time2[x][j] = q6_exec_time2_saved[j];
+                    break;
+                case 6:
+                    exec_time2[x][j] = q7_exec_time2_saved[j];
+                    break;
+                case 7:
+                    exec_time2[x][j] = q8_exec_time2_saved[j];
+                    break;
+                case 8:
+                    exec_time2[x][j] = q9_exec_time2_saved[j];
+                    break;
+                case 9:
+                    exec_time2[x][j] = q10_exec_time2_saved[j];
+                    break;
+                case 10:
+                    exec_time2[x][j] = q11_exec_time2_saved[j];
+                    break;
+                default:
+                    printf("query number error\n");
+            }
+        }
+        for (int k = 0 ; k < data3_len_saved ; k++){
+            data_num3[x][k] = data_num3_saved[k];
+            switch (x){
+                case 0:  
+                    exec_time3[x][k] = q1_exec_time3_saved[k];
+                    break;
+                case 1:
+                    exec_time3[x][k] = q2_exec_time3_saved[k];
+                    break;
+                case 2:
+                    exec_time3[x][k] = q3_exec_time3_saved[k];
+                    break;
+                case 3:
+                    exec_time3[x][k] = q4_exec_time3_saved[k];
+                    break;
+                case 4:
+                    exec_time3[x][k] = q5_exec_time3_saved[k];
+                    break;
+                case 5:
+                    exec_time3[x][k] = q6_exec_time3_saved[k];
+                    break;
+                case 6:
+                    exec_time3[x][k] = q7_exec_time3_saved[k];
+                    break;
+                case 7:
+                    exec_time3[x][k] = q8_exec_time3_saved[k];
+                    break;
+                case 8:
+                    exec_time3[x][k] = q9_exec_time3_saved[k];
+                    break;
+                case 9:
+                    exec_time3[x][k] = q10_exec_time3_saved[k];
+                    break;
+                case 10:
+                    exec_time3[x][k] = q11_exec_time3_saved[k];
+                    break;
+                default:
+                    printf("query number error\n");
+            }
+        }
     }
-    for (int k = 0 ; k < data3_len ; k++){
-        data_num3[k] = data_num3_saved[k];
-        q1_exec_time3[k] = q1_exec_time3_saved[k];
+
+    for (int x = 0 ; x < QUERYNUM ; x++){
+        data1_len[x] = data1_len_saved;
+        data2_len[x] = data2_len_saved;
+        data3_len[x] = data3_len_saved;
     }
 
     *num1 = data_num1;
     *num2 = data_num2;
     *num3 = data_num3;
 
-    *exec_time1 = q1_exec_time1;
-    *exec_time2 = q1_exec_time2;
-    *exec_time3 = q1_exec_time3;
+    *exec_time1_out = exec_time1;
+    *exec_time2_out = exec_time2;
+    *exec_time3_out = exec_time3;
 
     *len1 = data1_len;
     *len2 = data2_len;
@@ -2686,7 +3489,7 @@ void add_new_data(double** num1, double** num2, double** num3,
         for (int i = 0 ; i < data1_len ; i++){
             if (data_num1[i] >= new_data_num_add){
                 if (data_num1[i] == new_data_num_add){
-                    printf("data already existed\n");
+                    printf("data already existed -> change to new\n");
                     q1_exec_time1[i] = (q1_exec_time1[i] + new_exec_time_add) / 2;
                     break;
                 } else{
@@ -2696,7 +3499,7 @@ void add_new_data(double** num1, double** num2, double** num3,
                     }
                     data_num1[i] = new_data_num_add;
                     q1_exec_time1[i] = new_exec_time_add;
-                    data1_len++;
+                    (*len1)++;
                     break;
                 }
             }
@@ -2706,7 +3509,7 @@ void add_new_data(double** num1, double** num2, double** num3,
         for (int i = 0 ; i < data2_len ; i++){
             if (data_num2[i] >= new_data_num_add){
                 if (data_num2[i] == new_data_num_add){
-                    printf("data already existed\n");
+                    printf("data already existed -> change to new\n");
                     q1_exec_time2[i] = (q1_exec_time2[i] + new_exec_time_add) / 2;
                     break;
                 } else{
@@ -2716,7 +3519,7 @@ void add_new_data(double** num1, double** num2, double** num3,
                     }
                     data_num2[i] = new_data_num_add;
                     q1_exec_time2[i] = new_exec_time_add;
-                    data2_len++;
+                    (*len2)++;
                     break;
                 }
             }
@@ -2725,7 +3528,7 @@ void add_new_data(double** num1, double** num2, double** num3,
         for (int i = 0 ; i < data3_len ; i++){
             if (data_num3[i] >= new_data_num_add){
                 if (data_num3[i] == new_data_num_add){
-                    printf("data already existed\n");
+                    printf("data already existed -> change to new\n");
                     q1_exec_time3[i] = (q1_exec_time3[i] + new_exec_time_add) / 2;
                     break;
                 } else{
@@ -2735,7 +3538,7 @@ void add_new_data(double** num1, double** num2, double** num3,
                     }
                     data_num3[i] = new_data_num_add;
                     q1_exec_time3[i] = new_exec_time_add;
-                    data3_len++;
+                    (*len3)++;
                     break;
                 }
             }
@@ -2750,6 +3553,10 @@ void add_new_data(double** num1, double** num2, double** num3,
                      &data_num2, &data_num3, &q1_exec_time2, &q1_exec_time3, &exec_coef2, &exec_coef3, false)){
         printf("Error occured in adj 2\n");
     }
+	    
+    *coef1 = exec_coef1;
+    *coef2 = exec_coef2;
+    *coef3 = exec_coef3;
 }
 
 /* ----------------------------------------------------------------
@@ -6806,16 +7613,183 @@ PostgresMain(int argc, char *argv[],
 		 */
 		DoingCommandRead = true;
 
+		if (query_num_recorded){
+			printf("Not query num checked\n");
+		}
+		query_num_recorded = false;		
+
 		if (start_time_recorded){
-			printf("Not time checked (not simple query)\n");
+			printf("Not time checked\n");
 		}
 		start_time_recorded = false;
+
+		if (num_rows_recorded){
+			printf("Not num rows checked\n");
+		}
+		num_rows_recorded = false;		
 
 		/*
 		 * (3) read a command (loop blocks here)
 		 */
 		firstchar = ReadCommand(&input_message);
 		printf("------------------------------------------new loop------------------------------------------\n");
+
+		if ((SIM_ADAPTIVE_RANGE) & (USE_ADAPTIVE_RANGE)){
+			if (!inited){
+				printf("arg case 1/1 - use adaptive range + initial values\n");
+				
+				get_init_values(&data_num1, &data_num2, &data_num3, &exec_time1, &exec_time2, &exec_time3, &data1_len, &data2_len, &data3_len);
+				exec_coef1 = (double **)malloc(sizeof(double) * QUERYNUM);
+				exec_coef2 = (double **)malloc(sizeof(double) * QUERYNUM);
+				exec_coef3 = (double **)malloc(sizeof(double) * QUERYNUM);
+
+				for (int i = 0 ; i < QUERYNUM ; i++){
+					if (adjust_range(data_num1[i], data_num2[i], exec_time1[i], exec_time2[i], &data1_len[i], &data2_len[i],
+									&data_num1[i], &data_num2[i], &exec_time1[i], &exec_time2[i], &exec_coef1[i], &exec_coef2[i], true)){
+						printf("Error occured in adj 1\n");
+					}
+					if (adjust_range(data_num2[i], data_num3[i], exec_time2[i], exec_time3[i], &data2_len[i], &data3_len[i],
+									&data_num2[i], &data_num3[i], &exec_time2[i], &exec_time3[i], &exec_coef2[i], &exec_coef3[i], false)){
+						printf("Error occured in adj 2\n");
+					}
+				}
+
+				inited = true;
+				//printf("data1 len: %d data2 len: %d data3 len: %d\n", data1_len[query_num], data2_len[query_num], data3_len[query_num]);
+			}
+		} else if (USE_ADAPTIVE_RANGE){
+			if (!inited){
+				printf("arg case 0/1 - use adaptive range, but start from zero\n");
+				int* data1_len = (int *)malloc(sizeof(int) * QUERYNUM);
+				int* data2_len = (int *)malloc(sizeof(int) * QUERYNUM);
+				int* data3_len = (int *)malloc(sizeof(int) * QUERYNUM);
+
+				exec_coef1 = (double **)malloc(sizeof(double) * QUERYNUM);
+				exec_coef2 = (double **)malloc(sizeof(double) * QUERYNUM);
+				exec_coef3 = (double **)malloc(sizeof(double) * QUERYNUM);
+
+				double** data_num1 = (double **)malloc(sizeof(double) * QUERYNUM);
+				double** data_num2 = (double **)malloc(sizeof(double) * QUERYNUM);
+				double** data_num3 = (double **)malloc(sizeof(double) * QUERYNUM);
+				double** exec_time1 = (double **)malloc(sizeof(double) * QUERYNUM);
+				double** exec_time2 = (double **)malloc(sizeof(double) * QUERYNUM);
+				double** exec_time3 = (double **)malloc(sizeof(double) * QUERYNUM);
+
+				for (int i = 0 ; i < QUERYNUM ; i++){
+					data_num1[i] = (double *)malloc(sizeof(double) * DATASIZE);
+					data_num2[i] = (double *)malloc(sizeof(double) * DATASIZE);
+					data_num3[i] = (double *)malloc(sizeof(double) * DATASIZE);
+					exec_time1[i] = (double *)malloc(sizeof(double) * DATASIZE);
+					exec_time2[i] = (double *)malloc(sizeof(double) * DATASIZE);
+					exec_time3[i] = (double *)malloc(sizeof(double) * DATASIZE);
+				}
+
+				inited = true;
+			}
+		} else if (SIM_ADAPTIVE_RANGE){
+			if (!inited){
+				printf("arg case 1/0 - simulate adaptive range once");
+				get_init_values(&data_num1, &data_num2, &data_num3, &exec_time1, &exec_time2, &exec_time3, &data1_len, &data2_len, &data3_len);
+				
+				exec_coef1 = (double **)malloc(sizeof(double) * QUERYNUM);
+				exec_coef2 = (double **)malloc(sizeof(double) * QUERYNUM);
+				exec_coef3 = (double **)malloc(sizeof(double) * QUERYNUM);
+
+				int query_num = Q1;
+				
+				printf("Init Restult\n");
+				print_data(data_num1[query_num], data1_len[query_num]);
+				printf("data1 len: %d\n", data1_len[query_num]);
+
+				print_data(data_num2[query_num], data2_len[query_num]);
+				printf("data2 len: %d\n", data2_len[query_num]);
+
+				print_data(data_num3[query_num], data3_len[query_num]);
+				printf("data3 len: %d\n", data3_len[query_num]);
+				
+				if (adjust_range(data_num1[query_num], data_num2[query_num], exec_time1[query_num], exec_time2[query_num], &data1_len[query_num], &data2_len[query_num],
+								&data_num1[query_num], &data_num2[query_num], &exec_time1[query_num], &exec_time2[query_num], &exec_coef1[query_num], &exec_coef2[query_num], true)){
+					printf("Error occured in adj 1\n");
+				}
+				if (adjust_range(data_num2[query_num], data_num3[query_num], exec_time2[query_num], exec_time3[query_num], &data2_len[query_num], &data3_len[query_num],
+								&data_num2[query_num], &data_num3[query_num], &exec_time2[query_num], &exec_time3[query_num], &exec_coef2[query_num], &exec_coef3[query_num], false)){
+					printf("Error occured in adj 2\n");
+				}
+				
+				printf("Final Restult\n");
+				print_data(data_num1[query_num], data1_len[query_num]);
+				for (int x = 0 ; x < EXEC_ORDER + 1 ; x++){
+					printf("%e ", exec_coef1[query_num][x]);
+				}
+				printf("\n");
+				printf("data1 len: %d\n", data1_len[query_num]);
+
+				print_data(data_num2[query_num], data2_len[query_num]);
+				for (int y = 0 ; y < EXEC_ORDER + 1 ; y++){
+					printf("%e ", exec_coef2[query_num][y]);
+				}
+				printf("\n");
+				printf("data2 len: %d\n", data2_len[query_num]);
+
+				print_data(data_num3[query_num], data3_len[query_num]);
+				for (int z = 0 ; z < EXEC_ORDER + 1 ; z++){
+					printf("%e ", exec_coef3[query_num][z]);
+				}
+				printf("\n");
+				printf("data3 len: %d\n", data3_len[query_num]);
+				
+				double new_data_num_predict = 375000000;
+				double new_exec_time_predict = 0;
+
+				if (new_data_num_predict <= data_num2[query_num][0]){
+					new_exec_time_predict = polyval(new_data_num_predict, exec_coef1[query_num]);
+				} else if (new_data_num_predict <= data_num3[query_num][0]){
+					new_exec_time_predict = polyval(new_data_num_predict, exec_coef2[query_num]);
+				} else{
+					new_exec_time_predict = polyval(new_data_num_predict, exec_coef3[query_num]);
+				}
+
+				printf("Predicted for %lf -> %lf\n", new_data_num_predict, new_exec_time_predict);
+
+				double new_data_num_add = 35000 / 1000;
+				double new_exec_time_add = 39.5;
+
+				add_new_data(&data_num1[query_num], &data_num2[query_num],  &data_num3[query_num], 
+							&exec_time1[query_num], &exec_time2[query_num], &exec_time3[query_num],
+							&data1_len[query_num], &data2_len[query_num], &data3_len[query_num],
+							&exec_coef1[query_num], &exec_coef2[query_num],  &exec_coef3[query_num],
+							new_data_num_add, new_exec_time_add);
+
+				printf("Final Restult 2\n");
+				print_data(data_num1[query_num], data1_len[query_num]);
+				for (int x = 0 ; x < EXEC_ORDER + 1 ; x++){
+					printf("%e ", exec_coef1[query_num][x]);
+				}
+				printf("\n");
+				printf("data1 len: %d\n", data1_len[query_num]);
+
+				print_data(data_num2[query_num], data2_len[query_num]);
+				for (int y = 0 ; y < EXEC_ORDER + 1 ; y++){
+					printf("%e ", exec_coef2[query_num][y]);
+				}
+				printf("\n");
+				printf("data2 len: %d\n", data2_len[query_num]);
+
+				print_data(data_num3[query_num], data3_len[query_num]);
+				for (int z = 0 ; z < EXEC_ORDER + 1 ; z++){
+					printf("%e ", exec_coef3[query_num][z]);
+				}
+				printf("\n");
+				printf("data3 len: %d\n", data3_len[query_num]);
+
+				inited = true;
+			}
+		} else{
+			if (!inited){
+				printf("arg case 0/0 - not use adaptive range");
+			}
+			inited = true;
+		}
 
 		start_time_recorded = true;
 		query_start_time = clock();
@@ -6886,13 +7860,6 @@ PostgresMain(int argc, char *argv[],
 
 					if (start_time_recorded){
 						query_end_time = clock();
-						printf("end time: %lf\n", (double)query_end_time);
-						printf("Time used: %lf\n", ((double)(query_end_time - query_start_time) / CLOCKS_PER_SEC) * 1000);
-						start_time_recorded = false;
-					}
-					if (num_rows_recorded){
-						printf("row number fetched from dataset: %ld\n", num_rows);
-						num_rows_recorded = false;
 					}
 
 					if (train_flag){
@@ -6904,97 +7871,45 @@ PostgresMain(int argc, char *argv[],
 						printf("train flag solved----\n");
 						free(train_table_create_query);
 					}
-					if ((!inited) & (USE_ADAPTIVE_RANGE)){
-						inited = true;
-						get_init_values(&data_num1, &data_num2, &data_num3, &q1_exec_time1, &q1_exec_time2, &q1_exec_time3, &data1_len, &data2_len, &data3_len);
-						
-						printf("Initalized\n");
-						print_data(data_num1, data1_len);
-						printf("data1 len: %d\n", data1_len);
 
-						print_data(data_num2, data2_len);
-						printf("data2 len: %d\n", data2_len);
 
-						print_data(data_num3, data3_len);
-						printf("data3 len: %d\n", data3_len);
+					if ((SIM_ADAPTIVE_RANGE) & (USE_ADAPTIVE_RANGE)){
+						if ((cpu_used) & (query_num_recorded & start_time_recorded & num_rows_recorded)){
+							double new_exec_time_add = ((double)(query_end_time - query_start_time) / CLOCKS_PER_SEC) * 1000;
+							printf("arg case 1/1 - new data come (query num: %d / data num: %f / execute time: %f)\n", query_num + 1, num_rows, new_exec_time_add);
 
-						get_init_values(&data_num1, &data_num2, &data_num3, &q1_exec_time1, &q1_exec_time2, &q1_exec_time3, &data1_len, &data2_len, &data3_len);
-    
-						if (adjust_range(data_num1, data_num2, q1_exec_time1, q1_exec_time2, &data1_len, &data2_len,
-										&data_num1, &data_num2, &q1_exec_time1, &q1_exec_time2, &exec_coef1, &exec_coef2, true)){
-							printf("Error occured in adj 1\n");
-						}
-						if (adjust_range(data_num2, data_num3, q1_exec_time2, q1_exec_time3, &data2_len, &data3_len,
-										&data_num2, &data_num3, &q1_exec_time2, &q1_exec_time3, &exec_coef2, &exec_coef3, false)){
-							printf("Error occured in adj 2\n");
+							double new_data_num_add = num_rows / 1000;
+							add_new_data(&data_num1[query_num], &data_num2[query_num], &data_num3[query_num], 
+										&exec_time1[query_num], &exec_time2[query_num], &exec_time3[query_num],
+										&data1_len[query_num], &data2_len[query_num], &data3_len[query_num],
+										&exec_coef1[query_num], &exec_coef2[query_num], &exec_coef3[query_num],
+										new_data_num_add, new_exec_time_add);
+									
+							//printf("arg case 1/1 - data1 len: %d data2 len: %d data3 len: %d\n", data1_len[query_num], data2_len[query_num], data3_len[query_num]);
+							printf("arg case 1/1 - data successfully added to data range\n");
 						}
 						
-						printf("Final Restult\n");
-						print_data(data_num1, data1_len);
-						for (int x = 0 ; x < EXEC_ORDER + 1 ; x++){
-							printf("%e ", exec_coef1[x]);
-						}
-						printf("\n");
-						printf("data1 len: %d\n", data1_len);
+					} else if (USE_ADAPTIVE_RANGE){
+						if ((cpu_used) & (query_num_recorded & start_time_recorded & num_rows_recorded)){
+							double new_exec_time_add = ((double)(query_end_time - query_start_time) / CLOCKS_PER_SEC) * 1000;
+							printf("arg case 0/1 - new data come (query num: %d / data num: %f / execute time: %f)\n", query_num + 1, num_rows, new_exec_time_add);
 
-						print_data(data_num2, data2_len);
-						for (int y = 0 ; y < EXEC_ORDER + 1 ; y++){
-							printf("%e ", exec_coef2[y]);
-						}
-						printf("\n");
-						printf("data2 len: %d\n", data2_len);
-
-						print_data(data_num3, data3_len);
-						for (int z = 0 ; z < EXEC_ORDER + 1 ; z++){
-							printf("%e ", exec_coef3[z]);
-						}
-						printf("\n");
-						printf("data3 len: %d\n", data3_len);
-
-						double new_data_num_predict = 375000000;
-						double new_exec_time_predict = 0;
-
-						if (new_data_num_predict <= data_num2[0]){
-							new_exec_time_predict = polyval(new_data_num_predict, exec_coef1);
-						} else if (new_data_num_predict <= data_num3[0]){
-							new_exec_time_predict = polyval(new_data_num_predict, exec_coef2);
-						} else{
-							new_exec_time_predict = polyval(new_data_num_predict, exec_coef3);
+							double new_data_num_add = num_rows / 1000;
+							add_new_data(&data_num1[query_num], &data_num2[query_num], &data_num3[query_num], 
+										&exec_time1[query_num], &exec_time2[query_num], &exec_time3[query_num],
+										&data1_len[query_num], &data2_len[query_num], &data3_len[query_num],
+										&exec_coef1[query_num], &exec_coef2[query_num], &exec_coef3[query_num],
+										new_data_num_add, new_exec_time_add);
+							//printf("arg case 0/1 - data1 len: %d data2 len: %d data3 len: %d\n", data1_len[query_num], data2_len[query_num], data3_len[query_num]);
+							printf("arg case 0/1 - data successfully added to data range\n");
 						}
 
-						printf("Predicted for %lf -> %lf\n", new_data_num_predict, new_exec_time_predict);
+					} 
+					printf("End of loop - Query num: %d [data1 len: %d, data2 len: %d, data3 len: %d]\n", query_num + 1, data1_len[query_num], data2_len[query_num], data3_len[query_num]);
 
-						double new_data_num_add = 35000 / 1000;
-						double new_exec_time_add = 39.5;
-
-						add_new_data(&data_num1, &data_num2,  &data_num3, 
-									&q1_exec_time1, &q1_exec_time2, &q1_exec_time3,
-									&data1_len, &data2_len, &data3_len,
-									&exec_coef1, &exec_coef2,  &exec_coef3,
-									new_data_num_add, new_exec_time_add);
-
-						printf("Final Restult 2\n");
-						print_data(data_num1, data1_len);
-						for (int x = 0 ; x < EXEC_ORDER + 1 ; x++){
-							printf("%e ", exec_coef1[x]);
-						}
-						printf("\n");
-						printf("data1 len: %d\n", data1_len);
-
-						print_data(data_num2, data2_len);
-						for (int y = 0 ; y < EXEC_ORDER + 1 ; y++){
-							printf("%e ", exec_coef2[y]);
-						}
-						printf("\n");
-						printf("data2 len: %d\n", data2_len);
-
-						print_data(data_num3, data3_len);
-						for (int z = 0 ; z < EXEC_ORDER + 1 ; z++){
-							printf("%e ", exec_coef3[z]);
-						}
-						printf("\n");
-						printf("data3 len: %d\n", data3_len);
-					}
+					query_num_recorded = false;
+					start_time_recorded = false;
+					num_rows_recorded = false;
 
 					send_ready_for_query = true;
 				}

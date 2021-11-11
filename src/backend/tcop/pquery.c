@@ -768,8 +768,8 @@ PortalRun(Portal portal, long count, bool isTopLevel, bool run_once,
 				 * Now fetch desired portion of results.
 				 */
 				nprocessed = PortalRunSelect(portal, true, count, dest);
-				set_num_rows(nprocessed);
-				printf("Portal: %d rows\n", nprocessed);
+				//set_num_rows(nprocessed);
+				//printf("Portal: %d rows\n", nprocessed);
 
 				/*
 				 * If the portal result contains a command tag and the caller
@@ -992,7 +992,7 @@ PortalRunSelect(Portal portal,
 			}
 		}
 	}
-	printf("Portal (PortalRunSelect): %d rows\n", nprocessed);
+	//printf("Portal (PortalRunSelect): %d rows\n", nprocessed);
 	return nprocessed;
 }
 
@@ -1489,7 +1489,7 @@ PortalRunFetch(Portal portal,
 	ActivePortal = saveActivePortal;
 	CurrentResourceOwner = saveResourceOwner;
 	PortalContext = savePortalContext;
-	printf("Portal (PortalRunFetch): %d rows\n", result);
+	//printf("Portal (PortalRunFetch): %d rows\n", result);
 	return result;
 }
 
