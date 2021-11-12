@@ -1809,18 +1809,33 @@ get_data_num(Oid table_oid, int table_size, double *page_num){
 		printf("get_data_num - Oid error occured\n");
 	}
 
-	char pathname[MAXPGPATH];
-	char *relationpath = relpathbackend(table_rel->rd_node, table_rel->rd_backend, 0);
-	struct stat fst;
-	snprintf(pathname, MAXPGPATH, "%s", relationpath);
-	if (stat(pathname, &fst) < 0){
-		if (errno != ENOENT){
-			ereport(ERROR,
-					(errcode_for_file_access(),
-						errmsg("could not stat file \"%s\": %m", pathname)));
+    int64 totalsize = 0;
+    char *relationpath = relpathbackend(table_rel->rd_node, table_rel->rd_backend, 0);
+    char pathname[MAXPGPATH];
+    unsigned int segcount = 0;
+
+    for (segcount = 0;; segcount++){
+        struct stat fst;
+ 
+        CHECK_FOR_INTERRUPTS();
+ 
+        if (segcount == 0){
+            snprintf(pathname, MAXPGPATH, "%s", relationpath);
+		} else{
+            snprintf(pathname, MAXPGPATH, "%s.%u", relationpath, segcount);
 		}
-	}
-	double total_page_num = fst.st_size/0x2000;
+ 
+        if (stat(pathname, &fst) < 0){
+            if (errno == ENOENT){
+                break;
+			} else{
+                ereport(ERROR, (errcode_for_file_access(), errmsg("could not stat file \"%s\": %m", pathname)));
+			}
+        }
+		printf("stat_check: %ld (%d)\n", fst.st_size, segcount);
+        totalsize += fst.st_size;
+    }
+	double total_page_num = totalsize/0x2000;
 	*page_num = total_page_num;
 	double total_data_num = 0;
 	double first_page_size = PageGetMaxOffsetNumber(get_page_from_raw(get_raw_from_rel(table_rel)));
@@ -2033,7 +2048,7 @@ get_hw_expectation_time(int user_query_num, int user_dataset, double user_pagenu
 				break;
 			case (Q2):
 				user_unit_com_cycle = 5215;
-				user_unit_dma_cycle = 778503;
+				user_unit_dma_cycle = 785;
 				break;
 			case (Q3):
 				user_unit_com_cycle = 5308;
@@ -2423,8 +2438,9 @@ sw_stack_for_hw(const char* query_string, List* querytrees){
 		// Predictor
 		// Cost approx function
 		double page_num;
-		double new_data_num = get_data_num(rtable_relid[0], table_size[0], &page_num);
-		printf("Extracted data num: %f\n", new_data_num);
+		double row_num = get_data_num(rtable_relid[0], table_size[0], &page_num);
+		double new_data_num = row_num * op_info.model_col_len;
+		printf("Extracted data num: %f (%f * %d) / page num: %f\n", new_data_num, row_num, op_info.model_col_len, page_num);
 		num_rows_recorded = true;
 		num_rows = new_data_num;
 		
@@ -2442,6 +2458,9 @@ sw_stack_for_hw(const char* query_string, List* querytrees){
 				} else{
 					new_exec_time_predict = polyval(new_data_num_predict, exec_coef3[query_num]);
 				}	
+				if (new_exec_time_predict < 0){
+					new_exec_time_predict = 0;
+				}
 				printf("CPU cost prediction result [datanum: %f -> prediction time: %.3f (ms)]\n\t", new_data_num, new_exec_time_predict);
 
 				// HW COST APPROXIMATION
