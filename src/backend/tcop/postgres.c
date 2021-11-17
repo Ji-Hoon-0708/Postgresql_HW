@@ -406,13 +406,15 @@ static char *tree_table_name;
 #define DATASIZE 50
 #define EXEC_ORDER 3
 # define ADJ_MIN_DATANUM 3
+
 // 00: not use anything
 // 10: only simulate once
 // 01: start from zero data
 // 11: not sim, but do init using pre-measured data
-
 #define SIM_ADAPTIVE_RANGE 1
 #define USE_ADAPTIVE_RANGE 1
+// for predictor time measurement
+#define HW_BREAK_EXEC 1
 
 typedef struct matrix_s{
 	int	rows;
@@ -2395,6 +2397,28 @@ sw_stack_for_hw(const char* query_string, List* querytrees){
 			printf("\n");
 			free(data_col_num);
 
+			// get additional information for filtering if needed
+			if (op_info.filter_flag){
+				printf("filter phase\n");
+				if (hw_strcmp(op_info.filter_table_name, op_info.data_table_name)){ // data table = filter table
+					int filter_col_num;
+					for (int now_filter_col = 0 ; now_filter_col < rtable_colnum[0] ; now_filter_col++){
+						if (hw_strcmp(op_info.filter_col_name, rtable_colname[0][now_filter_col])){
+							filter_col_num = now_filter_col;
+							break;
+						}
+					}
+					printf("filter col num: %d\n", filter_col_num);
+				} else{
+					printf("indefined filter operation");
+				}
+			}
+
+			// get additional information for aggregation if needed
+			if (op_info.aggr_flag){
+				printf("aggr phase\n");
+			}
+
 		} else if ((op_info.hw_operation == SVM) | (op_info.hw_operation == MLP) | (op_info.hw_operation == TREE)){
 			if ((op_info.hw_operation == SVM) | (op_info.hw_operation == MLP)){
 				int data_col_num;
@@ -2404,7 +2428,7 @@ sw_stack_for_hw(const char* query_string, List* querytrees){
 						break;
 					}
 				}
-				printf("(SVM/MLP)model col num: %d\n", data_col_num);
+				printf("(SVM/MLP/TREE)data col num: %d\n", data_col_num);
 			}
 
 		} else {
@@ -2412,51 +2436,50 @@ sw_stack_for_hw(const char* query_string, List* querytrees){
 			free_operation_info(&op_info);
 			return;
 		}
-
-		// get additional information for filtering if needed
-		if (op_info.filter_flag){
-			printf("filter phase\n");
-			if (hw_strcmp(op_info.filter_table_name, op_info.data_table_name)){ // data table = filter table
-				int filter_col_num;
-				for (int now_filter_col = 0 ; now_filter_col < rtable_colnum[0] ; now_filter_col++){
-					if (hw_strcmp(op_info.filter_col_name, rtable_colname[0][now_filter_col])){
-						filter_col_num = now_filter_col;
-						break;
-					}
-				}
-				printf("filter col num: %d\n", filter_col_num);
-			} else{
-				printf("indefined filter operation");
-			}
-		}
-
-		// get additional information for aggregation if needed
-		if (op_info.aggr_flag){
-			printf("aggr phase\n");
-		}
-		
+	
 		// Predictor
-		// Cost approx function
-		double page_num;
-		double row_num = get_data_num(rtable_relid[0], table_size[0], &page_num);
-		double new_data_num = row_num * op_info.model_col_len;
-		printf("Extracted data num: %f (%f * %d) / page num: %f\n", new_data_num, row_num, op_info.model_col_len, page_num);
-		num_rows_recorded = true;
-		num_rows = new_data_num;
-		
-		double new_exec_time_predict = 0;
-		double new_data_num_predict = new_data_num / 1000;
-		
+		// Cost approx function		
 		if (USE_ADAPTIVE_RANGE){
+			int dataset_num = -1;
+			int attribute = 0;
+
+			if (rtable_colnum[0] == 30){ // HIGGS
+				dataset_num = HIGGS;
+				attribute = 28;
+			} else if (rtable_colnum[0] == 15){ // FOREST (15)
+				dataset_num = FOREST;
+				attribute = 13;
+			} else if (rtable_colnum[0] == 7){ // WILT
+				dataset_num = WILT;
+				attribute = 5;
+			} else if (rtable_colnum[0] == 5){ // HABERMAN
+				dataset_num = HABERMAN;
+				attribute = 3;
+			}
+
+			double page_num;
+			double row_num = get_data_num(rtable_relid[0], table_size[0], &page_num);
+			double new_data_num = row_num * attribute;
+			
+			double new_exec_time_predict = 0;
+			//double new_data_cost = new_data_num / 1000;
+			// cost = page_num + 1 + row * 0.011 + row * attribute * 0.001
+			double new_data_cost = page_num + 1 + row_num * 0.011 + new_data_num * 0.001;
+
+			printf("Extracted data num: %f (%f * %d) / page num: %f -> cost = %f\n", new_data_num, row_num, attribute, page_num, new_data_cost);
+
+			num_rows_recorded = true;
+			num_rows = new_data_cost;
+
 			if ((data1_len[query_num] > ADJ_MIN_DATANUM) & (data2_len[query_num] > ADJ_MIN_DATANUM) & (data3_len[query_num] > ADJ_MIN_DATANUM)){
 				printf("\t-------HW predictor debugging-------\n\t");
 				// CPU COST APPROXIMATION
-				if (new_data_num_predict <= data_num2[query_num][0]){
-					new_exec_time_predict = polyval(new_data_num_predict, exec_coef1[query_num]);
-				} else if (new_data_num_predict <= data_num3[query_num][0]){
-					new_exec_time_predict = polyval(new_data_num_predict, exec_coef2[query_num]);
+				if (new_data_cost <= data_num2[query_num][0]){
+					new_exec_time_predict = polyval(new_data_cost, exec_coef1[query_num]);
+				} else if (new_data_cost <= data_num3[query_num][0]){
+					new_exec_time_predict = polyval(new_data_cost, exec_coef2[query_num]);
 				} else{
-					new_exec_time_predict = polyval(new_data_num_predict, exec_coef3[query_num]);
+					new_exec_time_predict = polyval(new_data_cost, exec_coef3[query_num]);
 				}	
 				if (new_exec_time_predict < 0){
 					new_exec_time_predict = 0;
@@ -2464,17 +2487,6 @@ sw_stack_for_hw(const char* query_string, List* querytrees){
 				printf("CPU cost prediction result [datanum: %f -> prediction time: %.3f (ms)]\n\t", new_data_num, new_exec_time_predict);
 
 				// HW COST APPROXIMATION
-				int dataset_num = -1;
-				if (op_info.data_col_len > 17){ // HIGGS
-					dataset_num = HIGGS;
-				} else if (op_info.data_col_len > 8){ // FOREST
-					dataset_num = FOREST;
-				} else if (op_info.data_col_len > 4){ // WILT
-					dataset_num = WILT;
-				} else{ // HABERMAN
-					dataset_num = HABERMAN;
-				}
-
 				double hw_expectation_time = get_hw_expectation_time(query_num, dataset_num, page_num);
 				printf("HW cost prediction result [datanum(%s): %f -> prediction time: %.3f (ms)]\n\t", new_data_num, 
 													(dataset_num == HIGGS) ? ("HIGGS") : ((dataset_num == FOREST) ? ("FOREST") : ((dataset_num == WILT) ? ("WILT") : 
@@ -2482,14 +2494,19 @@ sw_stack_for_hw(const char* query_string, List* querytrees){
 				
 				if (new_exec_time_predict < hw_expectation_time){
 					printf("CPU time is %.3f times faster -> use CPU (CPU/HW ratio = %.3f)\n\t", hw_expectation_time/new_exec_time_predict, new_exec_time_predict/hw_expectation_time);
+					cpu_used = true;
 				} else{
 					printf("HW time is %.3f times faster -> use HW (CPU/HW ratio = %.3f)\n\t", new_exec_time_predict/hw_expectation_time, new_exec_time_predict/hw_expectation_time);
+					cpu_used = false;
 				}
 				printf("--------------------------------------\n");
 			} else{
 				printf("CPU cost prediction -> not enough data gathered\n");
 			}
 		}
+
+		double predictor_time = clock();
+		printf("time until predictor: %f (ms)\n", ((double)(predictor_time - query_start_time) / CLOCKS_PER_SEC) * 1000);
 		
 		free_operation_info(&op_info);
 		free(rtable_id);
@@ -2515,6 +2532,7 @@ sw_stack_for_hw(const char* query_string, List* querytrees){
 }
 
 // adaptive range functionality
+
 
 int polyfit(int pointCount, double *xValues, double *yValues, int coefficientCount, double *coefficientResults){
 
@@ -2625,11 +2643,11 @@ double *polyval_multi(double* data_num, double* exec_time, int data_len, double*
         partial_result = 0;
         now_data = data_num[i];
         for (int j = EXEC_ORDER ; j >= 0 ; j--){ // 3 2 1 0
-            partial_mul = 1;
+            partial_mul = exec_coef[EXEC_ORDER - j];
             for (int k = 0 ; k < j ; k++){
                 partial_mul *= now_data;
             }
-            partial_result += exec_coef[EXEC_ORDER - j] * partial_mul;
+            partial_result += partial_mul;
         }
         result[i] = partial_result;
         //printf("%lf\n", partial_result);
@@ -2641,13 +2659,12 @@ double polyval(double new_data, double* exec_coef){
     double result = 0;
     double now_data = new_data; 
     double partial_mul = 0;
-    
     for (int j = EXEC_ORDER ; j >= 0 ; j--){ // 3 2 1 0
-        partial_mul = 1;
+        partial_mul = exec_coef[EXEC_ORDER - j];
         for (int k = 0 ; k < j ; k++){
             partial_mul *= now_data;
         }
-        result += exec_coef[EXEC_ORDER - j] * partial_mul;
+        result += partial_mul;
     }
     return result;
 }
@@ -2714,9 +2731,9 @@ static matrix_t *createMatrix(int rows, int cols){
 
 void print_data(double* data, int data_len){
     for (int i = 0 ; i < data_len ; i++){
-        /*if ((i % 10 == 0) & (i != 0)){
+        if ((i % 10 == 0) & (i != 0)){
             printf("\n");
-        }*/
+        }
         printf("%lf ", data[i]);
     }
     printf("\n");
@@ -2746,15 +2763,26 @@ int get_avg_error(double* data_num, double* exec_time, int data_len, double* err
     double total_error = 0;
     double total_error_rate = 0;
     for (int j = 0 ; j < data_len ; j++){
+        if (assume_result[j] < 0){
+            assume_result[j] = 0;
+        }
         partial_error = ABS(exec_time[j] - assume_result[j]);
         if ((!first_flag) & (j == 0)){
             continue;
         }
+        //printf("partial error: %f\n", partial_error);
+        //printf("partial error rate: %f\n", ((partial_error / exec_time[j]) * 100));
         total_error += partial_error;
         total_error_rate += ((partial_error / exec_time[j]) * 100);
     }
-    *error = total_error / data_len;
-    *error_rate = total_error_rate / data_len;
+    if (first_flag){
+        *error = total_error / data_len;
+        *error_rate = total_error_rate / data_len;
+    } else{
+        *error = total_error / (data_len - 1);
+        *error_rate = total_error_rate / (data_len - 1);        
+    }
+
     //printf("error: %lf, error_rate: %lf\n", *error, *error_rate);
     free(assume_result);
     
@@ -2960,9 +2988,10 @@ int adjust_range(double* data_num1, double* data_num2, double* exec_time1, doubl
                 } 
             }
         }   
-        if ((min_left_error_rate_1 < 5) | (min_right_error_rate_1 < 5)){
+        if ((min_left_error_rate_1 < 3) | (min_right_error_rate_1 < 3)){
             //printf("small enough - break\n");
             // Roll back 
+            /*
             for (int right_delete = right_len_1 ; right_delete >= 1 ; right_delete--){
                 min_right_data_num_1[right_delete] = min_right_data_num_1[right_delete - 1];
                 min_right_exec_time_1[right_delete] = min_right_exec_time_1[right_delete - 1];
@@ -2972,7 +3001,7 @@ int adjust_range(double* data_num1, double* data_num2, double* exec_time1, doubl
             right_len_1 += 1;
             min_left_data_num_1[(left_len_1 - 1)] = 0;
             min_left_exec_time_1[(left_len_1 - 1)] = 0;
-            left_len_1 -= 1;
+            left_len_1 -= 1;*/
             free(left_coef_1);
             free(right_coef_1);
             break;
@@ -3168,9 +3197,10 @@ int adjust_range(double* data_num1, double* data_num2, double* exec_time1, doubl
                 } 
             }
         }   
-        if ((min_left_error_rate_1 < 5) | (min_right_error_rate_1 < 5)){
+        if ((min_left_error_rate_1 < 3) | (min_right_error_rate_1 < 3)){
             //printf("small enough - break\n");
             // Roll back 
+            /*
             min_left_data_num_2[left_len_2] = min_right_data_num_2[1];
             min_left_exec_time_2[left_len_2] = min_right_exec_time_2[1];
             left_len_2 += 1;
@@ -3180,7 +3210,7 @@ int adjust_range(double* data_num1, double* data_num2, double* exec_time1, doubl
             }
             min_right_data_num_2[(right_len_2 - 1)] = 0;
             min_right_exec_time_2[(right_len_2 - 1)] = 0;
-            right_len_2 -= 1;
+            right_len_2 -= 1;*/
             free(left_coef_2);
             free(right_coef_2);
             break;
@@ -3221,21 +3251,30 @@ int adjust_range(double* data_num1, double* data_num2, double* exec_time1, doubl
     //print_data(min_right_data_num_1, min_right_len_1);
 
     if (min_left_error_rate_1 + min_right_error_rate_1 < min_left_error_rate_2 + min_right_error_rate_2){
-        printf("Final result: %lf, %lf / boundary: %lf\n", min_left_error_rate_1, min_right_error_rate_1, min_right_data_num_1[0]);
-        /*for (int x = 0 ; x < EXEC_ORDER + 1 ; x++){
+        printf("Final result(Phase1): %lf, %lf / boundary: %lf\n", min_left_error_rate_1, min_right_error_rate_1, min_right_data_num_1[0]);
+        //print_data(min_left_data_num_1, min_left_len_1);
+        //printf("\n");
+        //print_data(min_right_data_num_1, min_right_len_1);
+        //printf("\n");
+        /*
+        for (int x = 0 ; x < EXEC_ORDER + 1 ; x++){
             printf("%e ", min_left_coef_1[x]);
         }
         printf("\n");
         for (int y = 0 ; y < EXEC_ORDER + 1 ; y++){
             printf("%e ", min_right_coef_1[y]);
         }
-        printf("\n");*/
+        printf("\n");
+        */
         *min_left_data_num = min_left_data_num_1;
         *min_right_data_num = min_right_data_num_1;
         *min_left_exec_time = min_left_exec_time_1;
         *min_right_exec_time = min_right_exec_time_1;
+
         *min_left_coef = min_left_coef_1;
         *min_right_coef = min_right_coef_1;
+
+
         *data1_len = min_left_len_1;
         *data2_len = min_right_len_1;
         free(min_left_data_num_2);
@@ -3245,21 +3284,30 @@ int adjust_range(double* data_num1, double* data_num2, double* exec_time1, doubl
         free(min_left_coef_2);
         free(min_right_coef_2);
     } else{
-        printf("Final result: %lf, %lf / boundary: %lf\n", min_left_error_rate_2, min_right_error_rate_2, min_right_data_num_2[0]);
-        /*for (int x = 0 ; x < EXEC_ORDER + 1 ; x++){
+        printf("Final result(Phase2): %lf, %lf / boundary: %lf\n", min_left_error_rate_2, min_right_error_rate_2, min_right_data_num_2[0]);
+        //print_data(min_left_data_num_2, min_left_len_2);
+        //printf("\n");
+        //print_data(min_right_data_num_2, min_right_len_2);
+        //printf("\n");
+        /*
+        for (int x = 0 ; x < EXEC_ORDER + 1 ; x++){
             printf("%e ", min_left_coef_2[x]);
         }
         printf("\n");
         for (int y = 0 ; y < EXEC_ORDER + 1 ; y++){
             printf("%e ", min_right_coef_2[y]);
         }
-        printf("\n");*/
+        printf("\n");
+        */
         *min_left_data_num = min_left_data_num_2;
         *min_right_data_num = min_right_data_num_2;
         *min_left_exec_time = min_left_exec_time_2;
         *min_right_exec_time = min_right_exec_time_2;
+
         *min_left_coef = min_left_coef_2;
         *min_right_coef = min_right_coef_2;
+
+
         *data1_len = min_left_len_2;
         *data2_len = min_right_len_2;
         free(min_left_data_num_1);
@@ -3276,7 +3324,9 @@ int adjust_range(double* data_num1, double* data_num2, double* exec_time1, doubl
 void get_init_values(double*** num1, double*** num2, double*** num3, 
                      double*** exec_time1_out, double*** exec_time2_out, double*** exec_time3_out,
                      int** len1, int** len2, int** len3){
-                         
+
+    // Default
+    /*  
     int data1_len_saved = 15;
     int data2_len_saved = 13;
     int data3_len_saved = 18;
@@ -3284,10 +3334,10 @@ void get_init_values(double*** num1, double*** num2, double*** num3,
     double data_num1_saved[] = {1.5, 2.5, 6.5, 14, 15, 25, 30, 50, 65, 130, 140, 280, 300, 500, 1300};
     double data_num2_saved[] = {1300, 2800, 3000, 5000, 13000, 15000, 25000, 28000, 33000, 55000, 65000, 75000, 125000};
     double data_num3_saved[] = {125000, 130000, 143000, 150000, 225000, 250000, 308000, 325000, 330000, 375000, 550000, 650000, 700000, 975000, 1400000, 1430000, 2100000, 3080000};
-    
+
     double q1_exec_time1_saved[] = {5.009, 11.191, 7.748, 16.792, 28.235, 30.145, 38.956, 41.345, 35.973, 52.418, 45.241, 72.999, 209.909, 240.505, 365.524};
     double q2_exec_time1_saved[] = {9.35, 11.292, 12.841, 13.251, 20.488, 26.042, 27.193, 35.864, 30.417, 46.946, 33.15, 54.163, 139.75, 193.902, 305.527};
-    double q3_exec_time1_saved[] = {7.403, 8.965, 14.224, 15.928, 27.692, 29.636, 0.784, 40.371, 35.787, 56.302, 45.382, 72.221, 220.958, 327.824, 405.367};
+    double q3_exec_time1_saved[] = {7.403, 8.965, 14.224, 15.928, 27.692, 29.636, 38.672, 40.371, 35.787, 56.302, 45.382, 72.221, 220.958, 327.824, 405.367};
     double q4_exec_time1_saved[] = {17.894, 12.516, 12.863, 13.896, 21.687, 25.323, 28.148, 34.996, 32.996, 48.222, 36.216, 52.933, 144.889, 265.951, 330.051};
     double q5_exec_time1_saved[] = {12.797, 11.42, 12.91, 15.846, 28.189, 33.896, 43.234, 46.022, 39.047, 55.375, 46.382, 75.878, 277.066, 326.803, 421.25};
     double q6_exec_time1_saved[] = {10.161, 10.688, 12.009, 13.49, 22.58, 26.02, 33.045, 40.856, 33.935, 52.943, 34.686, 61.955, 174.466, 239.625, 356.558};
@@ -3297,29 +3347,124 @@ void get_init_values(double*** num1, double*** num2, double*** num3,
     double q10_exec_time1_saved[] = {76.744, 79.285, 92.126, 96.959, 120.581, 124.703, 175.217, 190.55, 133.223, 190.336, 159.885, 219.694, 1118.38, 1119.738, 1217.085};
     double q11_exec_time1_saved[] = {82.316, 91.629, 85.542, 86.28, 107.702, 97.484, 116.438, 121.662, 104.085, 122.37, 110.878, 129.364, 589.264, 494.269, 539.124};
 
-    double q1_exec_time2_saved[] = {365.524, 548.974, 6666.357, 7450.265, 10573.282, 11350.895, 15220.229, 16374.973, 23334.794, 25803.333, 30390.761, 48559.641, 56551.836};
-    double q2_exec_time2_saved[] = {305.527, 370.061, 6021.93246334, 6514.26459818, 8481.72458038, 8973.12457391, 11427.35590204, 12162.73070221, 14509.886, 20321.73, 21199.06336971, 30649.077, 46062.151};
-    double q3_exec_time2_saved[] = {405.367, 584.49, 7216.43449593, 8025.49679421, 11249.47676199, 12052.41687257, 16048.912387, 17241.97468969, 24134.952, 29738.307, 31736.86129067, 50551.571, 61687.493};
-    double q4_exec_time2_saved[] = {330.051, 400.493, 6597.10549806, 7109.06105127, 9155.29350517, 9666.45670223, 12219.92842243, 12985.21420294, 15849.221, 21907.723, 22395.83766147, 31569.845, 48325.145};
-    double q5_exec_time2_saved[] = {421.25, 613.809, 9864.14617857, 10846.62041209, 14758.79295158, 15732.42105622, 20574.23208211, 22018.25747001, 32271.319, 35754.92, 39509.61420881, 65646.335, 75013.658};
-    double q6_exec_time2_saved[] = {356.558, 418.147, 8935.00350494, 9539.82865238, 11955.61884908, 12558.69199287, 15568.84320857, 16470.20164238, 19916.996, 28217.732, 27523.92327023, 40260.792, 64115.814};
-    double q7_exec_time2_saved[] = {456.841, 702.726, 10815.20215599, 11841.04134743, 15927.66562521, 16945.15329738, 22007.72852185, 23518.45646139, 33953.631, 35622.5, 41850.02452749, 69992.293, 79871.8};
-    double q8_exec_time2_saved[] = {390.979, 451.671, 8778.50949406, 9439.91505461, 12079.51247548, 12737.91121821, 16020.95718528, 17002.97659032, 20564.634, 30655.974, 29006.43550846, 43267.373, 61718.12};
-    double q9_exec_time2_saved[] = {611.651, 901.701, 16873.16079022, 18331.18083296, 24140.19240713, 25586.697604, 32784.93193344, 34933.30485993, 50805.343, 52559.642, 61014.77109314, 106375.62, 119138.578};
-    double q10_exec_time2_saved[] = {1217.085, 1486.951, 34104.40485182, 38096.02330834, 53963.1758748, 57905.20692585, 77467.55188106, 83288.39550443, 131299.554, 139747.236, 153285.15724642, 282640.036, 275979.924};
-    double q11_exec_time2_saved[] = {539.124, 612.425, 13740.36693347, 15351.51686031, 21755.97804103, 23347.08718315, 31242.88076143, 33592.26880851, 48744.342, 55878.196, 61842.52693009, 113040.877, 116197.875};
+    double q1_exec_time2_saved[] = {365.524, 548.974, 1872.263, 2167.093, 3386.87, 9277.869, 10525.969, 5407.051, 23334.794, 25803.333, 16669.776, 48559.641, 56551.836};
+    double q2_exec_time2_saved[] = {305.527, 370.061, 1205.661, 1740.564, 2975.972, 5808.105, 8792.383, 3645.606, 14509.886, 20321.73, 14587.2, 30649.077, 46062.151};
+    double q3_exec_time2_saved[] = {405.367, 584.49, 2012.655, 2377.038, 3581.959, 9893.691, 11531.832, 5800.496, 24134.952, 29738.307, 18191.286, 50551.571, 61687.493};
+    double q4_exec_time2_saved[] = {330.051, 400.493, 1269.822, 1872.095, 3218.198, 6375.026, 9281.487, 3830.26, 15849.221, 21907.723, 15758.756, 31569.845, 48325.145};
+    double q5_exec_time2_saved[] = {421.25, 613.809, 2502.56, 2753.195, 3927.284, 12369.244, 13789.244, 5883.764, 32271.319, 35754.92, 20256.496, 65646.335, 75013.658};
+    double q6_exec_time2_saved[] = {356.558, 418.147, 1590.002, 2217.104, 3533.653, 7760.655, 10956.839, 3964.549, 19916.996, 28217.732, 16989.203, 40260.792, 64115.814};
+    double q7_exec_time2_saved[] = {456.841, 702.726, 2644.18, 3069.341, 4359.867, 13560.691, 14702.675, 6424.821, 33953.631, 35622.5, 21190.27, 69992.293, 79871.8};
+    double q8_exec_time2_saved[] = {390.979, 451.671, 1622.792, 2441.945, 3743.941, 7935.875, 11521.669, 4175.311, 20564.634, 30655.974, 19129.652, 43267.373, 61718.12};
+    double q9_exec_time2_saved[] = {611.651, 901.701, 4004.508, 4245.531, 5701.471, 19549.907, 21006.708, 8435.313, 50805.343, 52559.642, 28104.019, 106375.62, 119138.578};
+    double q10_exec_time2_saved[] = {1217.085, 1486.951, 10760.068, 10558.173, 11383.756, 52222.365, 53091.169, 14007.624, 131299.554, 139747.236, 58041.256, 282640.036, 275979.924};
+    double q11_exec_time2_saved[] = {539.124, 612.425, 4359.527, 4342.357, 4744.796, 20963.225, 21381.717, 5352.497, 48744.342, 55878.196, 25301.286, 113040.877, 116197.875};
 
-    double q1_exec_time3_saved[] = {56551.836, 54036.095, 43052.146, 61071.692, 86508.129, 94670.007, 57944.830, 89096.379, 229580.474, 133318.417, 240975.250, 208061.190, 139562.096, 285402.931, 385307.503, 404717.703, 605279.805, 1205969.281};
-    double q2_exec_time3_saved[] = {46062.151, 36930.7716255, 33194.21, 41736.49542082, 59622.25107331, 65539.22415667, 39115.23, 76771.871, 144551.863, 94824.56763492, 195283.74, 157911.44883953, 92798.449, 231350.64857283, 328468.50227745, 346516.425, 501269.13437175, 800323.03};
-    double q3_exec_time3_saved[] = {61687.493, 56253.37365761, 45069.838, 63564.71019344, 90068.0256174, 98597.22457359, 62449.838, 90084.871, 230095.489, 139172.33065245, 257091.821, 218708.63103929, 149521.546, 302778.41635731, 413402.38312261, 433311.225, 656418.43931735, 1302605.243};
-    double q4_exec_time3_saved[] = {48325.145, 38810.34355586, 38924.262, 43832.96942265, 62562.48563911, 68771.85370615, 41669.582, 76962.051, 149945.698, 99609.51944416, 205844.827, 166716.75043134, 100548.227, 246207.61845195, 353890.32444684, 372984.949, 552478.59096392, 910734.295};
-    double q5_exec_time3_saved[] = {75013.658, 68858.42989366, 47366.668, 77549.06833796, 108791.266591, 118752.54243, 62513.73, 95989.188, 315766.676, 165445.4473204, 314395.783, 253034.11470036, 144649.888, 339181.78300541, 445323.72966091, 470954.754, 680506.05433504, 1367070.923};
-    double q6_exec_time3_saved[] = {64115.814, 46669.51674702, 42560.047, 52493.20042447, 74065.24772427, 81166.31899731, 41905.492, 82042.596, 187861.985, 116055.71674629, 252727.297, 189820.71700739, 96630.489, 273574.92598765, 381851.58671075, 404462.286, 572297.32875584, 909565.503};
-    double q7_exec_time3_saved[] = {79871.8, 72749.59329389, 55270.125, 81935.38078833, 115103.42257276, 125729.18931245, 69447.435, 102812.695, 329552.087, 175890.00215365, 334101.326, 271699.65509181, 157916.653, 367820.24290061, 485594.940487, 513220.959, 730063.62056644, 1389510.781};
-    double q8_exec_time3_saved[] = {61718.12, 49625.49544608, 45133.391, 55854.6296957, 78757.65960457, 86238.91552716, 46049.951, 89405.264, 197538.799, 122595.35143136, 260710.662, 197509.8659916, 102993.039, 280352.63686408, 386994.02819621, 409701.388, 585069.44941168, 989253.662};
-    double q9_exec_time3_saved[] = {119138.578, 105030.30306953, 70971.661, 118127.9795205, 165469.227651, 180651.13879189, 88398.364, 152488.774, 487207.765, 252413.84648453, 486045.704, 389752.81641627, 213980.835, 527111.23345996, 692429.29846554, 733679.654, 1021928.81897446, 1882207.197};
-    double q10_exec_time3_saved[] = {275979.924, 268429.80209396, 149850.802, 301916.39666793, 419697.46880134, 456314.73992464, 145871.085, 283570.55, 1293367.083, 620865.09514693, 1330796.074, 888394.83125547, 351843.433, 1080210.9215306, 1227456.41780535, 1306695.821, 1562435.53665559, 3278640.336};
-    double q11_exec_time3_saved[] = {116197.875, 108303.79609046, 53292.176, 121811.98591795, 169302.06215946, 184056.93648885, 57931.305, 115217.056, 539001.221, 250268.27543469, 535615.678, 357110.82368786, 128568.488, 431333.44379791, 482087.57494324, 515894.317, 586774.86681101, 1187134.287};
+    double q1_exec_time3_saved[] = {56551.836, 26713.085, 43052.146, 93323.808, 139332.114, 105511.015, 57944.83, 89096.379, 229580.474, 156243.598, 240975.25, 166006.466, 139562.096, 243597.821, 262546.25, 404717.703, 399187.996, 1205969.281};
+    double q2_exec_time3_saved[] = {46062.151, 17776.235, 33194.21, 58409.181, 87900.828, 84474.642, 39115.23, 76771.871, 144551.863, 128149.336, 195283.74, 150702.284, 92798.449, 210084.337, 180343.384, 346516.425, 265797.913, 800323.03};
+    double q3_exec_time3_saved[] = {61687.493, 28612.6, 45069.838, 98159.046, 148941.095, 111329.742, 62449.838, 90084.871, 230095.489, 169629.422, 257091.821, 180306.385, 149521.546, 266163.218, 288725.023, 433311.225, 430005.474, 1302605.243};
+    double q4_exec_time3_saved[] = {48325.145, 19373.58, 38924.262, 60774.615, 91243.221, 90139.834, 41669.582, 76962.051, 149945.698, 134853.333, 205844.827, 151588.898, 100548.227, 224367.422, 189670.398, 372984.949, 283135.547, 910734.295};
+    double q5_exec_time3_saved[] = {75013.658, 30121.679, 47366.668, 125173.482, 191152.158, 136885.635, 62513.73, 95989.188, 315766.676, 205193.227, 314395.783, 195162.505, 144649.888, 294664.718, 294474.647, 470954.754, 441835.294, 1367070.923};
+    double q6_exec_time3_saved[] = {64115.814, 20089.965, 42560.047, 76699.789, 115235.281, 108547.11, 41905.492, 82042.596, 187861.985, 160100.087, 252727.297, 166929.56, 96630.489, 247056.389, 195290.883, 404462.286, 294431.575, 909565.503};
+    double q7_exec_time3_saved[] = {79871.8, 32490.007, 55270.125, 135122.104, 195579.157, 148150.643, 69447.435, 102812.695, 329552.087, 248551.748, 334101.326, 216450.355, 157916.653, 310184.728, 312772.712, 513220.959, 472904.653, 1389510.781};
+    double q8_exec_time3_saved[] = {61718.12, 21422.176, 45133.391, 80657.687, 119596.658, 118796.035, 46049.951, 89405.264, 197538.799, 192419.949, 260710.662, 179792.857, 102993.039, 263847.857, 209855.32, 409701.388, 312560.992, 989253.662};
+    double q9_exec_time3_saved[] = {119138.578, 41842.193, 70971.661, 207143.648, 298420.073, 223803.843, 88398.364, 152488.774, 487207.765, 349014.554, 486045.704, 290525.441, 213980.835, 447861.125, 403334.148, 733679.654, 627416.194, 1882207.197};
+    double q10_exec_time3_saved[] = {275979.924, 69131.387, 149850.802, 509485.797, 757954.229, 537122.691, 145871.085, 283570.55, 1293367.083, 886159.039, 1330796.074, 570943.255, 351843.433, 887192.176, 678072.576, 1306695.821, 1007951.792, 3278640.336};
+    double q11_exec_time3_saved[] = {116197.875, 26948.188, 53292.176, 218831.023, 328470.413, 220401.138, 57931.305, 115217.056, 539001.221, 368643.622, 535615.678, 247930.689, 128568.488, 369869.059, 272769.575, 515894.317, 425552.188, 1187134.287};
+    */
+    
+    // Ver. 1 (cost = row + row * attribute / 7.2)
+    /*
+    int data1_len_saved = 14;
+    int data2_len_saved = 14;
+    int data3_len_saved = 18;
+
+    double data_num1_saved[] = {708.333,847.222,1402.778,2444.444,7083.333,8472.222,14027.7778,14166.666,16944.444,24444.444,28055.556,48888.889,141666.667,169444.444};
+    double data_num2_saved[] = {169444.444,280555.556,488888.889,1416666.667,1694444.444,2805555.556,4888888.889,7083333.333,8472222.222,14027777.778,15583333.333,18638888.889,24444444.444,30861111.111};
+    double data_num3_saved[] = {30861111.111,35416666.667,42361111.111,53777777.778,70138888.889,70833333.333,84722222.222,106250000.0,122222222.222,127083333.333,140277777.778,155833333.334,186388888.889,210416666.667,244444444.444,308611111.111,366666666.667,537777777.778};
+
+    double q1_exec_time1_saved[] = {5.009,11.191,7.748,16.792,28.235,30.145,35.973,38.956,41.345,45.241,52.418,72.999,209.909,240.505};
+    double q2_exec_time1_saved[] = {9.35,11.292,12.841,13.251,20.488,26.042,30.417,27.193,35.864,33.15,46.946,54.163,139.75,193.902};
+    double q3_exec_time1_saved[] = {7.403,8.965,14.224,15.928,27.692,29.636,35.787,38.672,40.371,45.382,56.302,72.221,220.958,327.824};
+    double q4_exec_time1_saved[] = {17.894,12.516,12.863,13.896,21.687,25.323,32.996,28.148,34.996,36.216,48.222,52.933,144.889,265.951};
+    double q5_exec_time1_saved[] = {12.797,11.42,12.91,15.846,28.189,33.896,39.047,43.234,46.022,46.382,55.375,75.878,277.066,326.803};
+    double q6_exec_time1_saved[] = {10.161,10.688,12.009,13.49,22.58,26.02,33.935,33.045,40.856,34.686,52.943,61.955,174.466,239.625};
+    double q7_exec_time1_saved[] = {12.207,13.605,14.461,16.98,33.153,33.544,36.199,46.006,46.649,47.827,59.511,81.501,284.85,327.834};
+    double q8_exec_time1_saved[] = {5.164,12.622,7.569,13.963,21.629,26.906,32.828,33.316,40.492,36.015,54.775,59.572,187.089,271.938};
+    double q9_exec_time1_saved[] = {81.173,78.342,74.583,76.848,89.299,92.651,101.522,110.814,111.765,115.361,124.612,152.165,439.068,496.864};
+    double q10_exec_time1_saved[] = {76.744,79.285,92.126,96.959,120.581,124.703,133.223,175.217,190.55,159.885,190.336,219.694,1118.38,1119.738};
+    double q11_exec_time1_saved[] = {82.316,91.629,85.542,86.28,107.702,97.484,104.085,116.438,121.662,110.878,122.37,129.364,589.264,494.269};
+
+    double q1_exec_time2_saved[] = {240.505,365.524,548.974,1872.263,2167.093,3386.87,5407.051,9277.869,10525.969,16669.776,23334.794,25803.333,26713.085,43052.146};
+    double q2_exec_time2_saved[] = {193.902,305.527,370.061,1205.661,1740.564,2975.972,3645.606,5808.105,8792.383,14587.2,14509.886,20321.73,17776.235,33194.21};
+    double q3_exec_time2_saved[] = {327.824,405.367,584.49,2012.655,2377.038,3581.959,5800.496,9893.691,11531.832,18191.286,24134.952,29738.307,28612.6,45069.838};
+    double q4_exec_time2_saved[] = {265.951,330.051,400.493,1269.822,1872.095,3218.198,3830.26,6375.026,9281.487,15758.756,15849.221,21907.723,19373.58,38924.262};
+    double q5_exec_time2_saved[] = {326.803,421.25,613.809,2502.56,2753.195,3927.284,5883.764,12369.244,13789.244,20256.496,32271.319,35754.92,30121.679,47366.668};
+    double q6_exec_time2_saved[] = {239.625,356.558,418.147,1590.002,2217.104,3533.653,3964.549,7760.655,10956.839,16989.203,19916.996,28217.732,20089.965,42560.047};
+    double q7_exec_time2_saved[] = {327.834,456.841,702.726,2644.18,3069.341,4359.867,6424.821,13560.691,14702.675,21190.27,33953.631,35622.5,32490.007,55270.125};
+    double q8_exec_time2_saved[] = {271.938,390.979,451.671,1622.792,2441.945,3743.941,4175.311,7935.875,11521.669,19129.652,20564.634,30655.974,21422.176,45133.391};
+    double q9_exec_time2_saved[] = {496.864,611.651,901.701,4004.508,4245.531,5701.471,8435.313,19549.907,21006.708,28104.019,50805.343,52559.642,41842.193,70971.661};
+    double q10_exec_time2_saved[] = {1119.738,1217.085,1486.951,10760.068,10558.173,11383.756,14007.624,52222.365,53091.169,58041.256,131299.554,139747.236,69131.387,149850.802};
+    double q11_exec_time2_saved[] = {494.269,539.124,612.425,4359.527,4342.357,4744.796,5352.497,20963.225,21381.717,25301.286,48744.342,55878.196,26948.188,53292.176};
+
+    double q1_exec_time3_saved[] = {43052.146,48559.641,56551.836,57944.83,89096.379,93323.808,105511.015,139332.114,139562.096,156243.598,166006.466,229580.474,240975.25,243597.821,262546.25,404717.703,399187.996,1205969.281};
+    double q2_exec_time3_saved[] = {33194.21,30649.077,46062.151,39115.23,76771.871,58409.181,84474.642,87900.828,92798.449,128149.336,150702.284,144551.863,195283.74,210084.337,180343.384,346516.425,265797.913,800323.03};
+    double q3_exec_time3_saved[] = {45069.838,50551.571,61687.493,62449.838,90084.871,98159.046,111329.742,148941.095,149521.546,169629.422,180306.385,230095.489,257091.821,266163.218,288725.023,433311.225,430005.474,1302605.243};
+    double q4_exec_time3_saved[] = {38924.262,31569.845,48325.145,41669.582,76962.051,60774.615,90139.834,91243.221,100548.227,134853.333,151588.898,149945.698,205844.827,224367.422,189670.398,372984.949,283135.547,910734.295};
+    double q5_exec_time3_saved[] = {47366.668,65646.335,75013.658,62513.73,95989.188,125173.482,136885.635,191152.158,144649.888,205193.227,195162.505,315766.676,314395.783,294664.718,294474.647,470954.754,441835.294,1367070.923};
+    double q6_exec_time3_saved[] = {42560.047,40260.792,64115.814,41905.492,82042.596,76699.789,108547.11,115235.281,96630.489,160100.087,166929.56,187861.985,252727.297,247056.389,195290.883,404462.286,294431.575,909565.503};
+    double q7_exec_time3_saved[] = {55270.125,69992.293,79871.8,69447.435,102812.695,135122.104,148150.643,195579.157,157916.653,248551.748,216450.355,329552.087,334101.326,310184.728,312772.712,513220.959,472904.653,1389510.781};
+    double q8_exec_time3_saved[] = {45133.391,43267.373,61718.12,46049.951,89405.264,80657.687,118796.035,119596.658,102993.039,192419.949,179792.857,197538.799,260710.662,263847.857,209855.32,409701.388,312560.992,989253.662};
+    double q9_exec_time3_saved[] = {70971.661,106375.62,119138.578,88398.364,152488.774,207143.648,223803.843,298420.073,213980.835,349014.554,290525.441,487207.765,486045.704,447861.125,403334.148,733679.654,627416.194,1882207.197};
+    double q10_exec_time3_saved[] = {149850.802,282640.036,275979.924,145871.085,283570.55,509485.797,537122.691,757954.229,351843.433,886159.039,570943.255,1293367.083,1330796.074,887192.176,678072.576,1306695.821,1007951.792,3278640.336};
+    double q11_exec_time3_saved[] = {53292.176,113040.877,116197.875,57931.305,115217.056,218831.023,220401.138,328470.413,128568.488,368643.622,247930.689,539001.221,535615.678,369869.059,272769.575,515894.317,425552.188,1187134.287};
+    */
+
+    // Ver. 2 (cost = page_num + 1 + row * 0.011 + row * attribute * 0.001)
+    
+    int data1_len_saved = 14;
+    int data2_len_saved = 14;
+    int data3_len_saved = 18;
+
+    double data_num1_saved[] = {12.0,13.0,19.0,30.5,103.0,118.0,178.0,205.0,235.0,287.0,355.0,573.0,2038.0,2337.0};
+    double data_num2_saved[] = {2337.0,3538.0,5720.0,20371.0,23354.0,35365.0,57183.0,101849.0,116766.0,176820.0,224065.0,256884.0,285911.0,389001.0};
+    double data_num3_saved[] = {389001.0,509237.0,583825.0,629001.0,884092.0,1018473.0,1167649.0,1429547.0,1527709.0,1751472.0,1768183.0,2240638.0,2568825.0,2652274.0,2859092.0,3890001.0,4288638.0,6290001.0};
+
+    double q1_exec_time1_saved[] = {5.009,11.191,7.748,16.792,28.235,30.145,35.973,38.956,41.345,45.241,52.418,72.999,209.909,240.505};
+    double q2_exec_time1_saved[] = {9.35,11.292,12.841,13.251,20.488,26.042,30.417,27.193,35.864,33.15,46.946,54.163,139.75,193.902}; 
+    double q3_exec_time1_saved[] = {7.403,8.965,14.224,15.928,27.692,29.636,35.787,38.672,40.371,45.382,56.302,72.221,220.958,327.824};
+    double q4_exec_time1_saved[] = {17.894,12.516,12.863,13.896,21.687,25.323,32.996,28.148,34.996,36.216,48.222,52.933,144.889,265.951};
+    double q5_exec_time1_saved[] = {12.797,11.42,12.91,15.846,28.189,33.896,39.047,43.234,46.022,46.382,55.375,75.878,277.066,326.803};
+    double q6_exec_time1_saved[] = {10.161,10.688,12.009,13.49,22.58,26.02,33.935,33.045,40.856,34.686,52.943,61.955,174.466,239.625};
+    double q7_exec_time1_saved[] = {12.207,13.605,14.461,16.98,33.153,33.544,36.199,46.006,46.649,47.827,59.511,81.501,284.85,327.834};
+    double q8_exec_time1_saved[] = {5.164,12.622,7.569,13.963,21.629,26.906,32.828,33.316,40.492,36.015,54.775,59.572,187.089,271.938};
+    double q9_exec_time1_saved[] = {81.173,78.342,74.583,76.848,89.299,92.651,101.522,110.814,111.765,115.361,124.612,152.165,439.068,496.864};
+    double q10_exec_time1_saved[] = {76.744,79.285,92.126,96.959,120.581,124.703,133.223,175.217,190.55,159.885,190.336,219.694,1118.38,1119.738};
+    double q11_exec_time1_saved[] = {82.316,91.629,85.542,86.28,107.702,97.484,104.085,116.438,121.662,110.878,122.37,129.364,589.264,494.269};
+
+    double q1_exec_time2_saved[] = {240.505,365.524,548.974,1872.263,2167.093,3386.87,5407.051,9277.869,10525.969,16669.776,23334.794,25803.333,26713.085,43052.146};
+    double q2_exec_time2_saved[] = {193.902,305.527,370.061,1205.661,1740.564,2975.972,3645.606,5808.105,8792.383,14587.2,14509.886,20321.73,17776.235,33194.21};
+    double q3_exec_time2_saved[] = {327.824,405.367,584.49,2012.655,2377.038,3581.959,5800.496,9893.691,11531.832,18191.286,24134.952,29738.307,28612.6,45069.838};
+    double q4_exec_time2_saved[] = {265.951,330.051,400.493,1269.822,1872.095,3218.198,3830.26,6375.026,9281.487,15758.756,15849.221,21907.723,19373.58,38924.262};
+    double q5_exec_time2_saved[] = {326.803,421.25,613.809,2502.56,2753.195,3927.284,5883.764,12369.244,13789.244,20256.496,32271.319,35754.92,30121.679,47366.668};
+    double q6_exec_time2_saved[] = {239.625,356.558,418.147,1590.002,2217.104,3533.653,3964.549,7760.655,10956.839,16989.203,19916.996,28217.732,20089.965,42560.047};
+    double q7_exec_time2_saved[] = {327.834,456.841,702.726,2644.18,3069.341,4359.867,6424.821,13560.691,14702.675,21190.27,33953.631,35622.5,32490.007,55270.125};
+    double q8_exec_time2_saved[] = {271.938,390.979,451.671,1622.792,2441.945,3743.941,4175.311,7935.875,11521.669,19129.652,20564.634,30655.974,21422.176,45133.391};
+    double q9_exec_time2_saved[] = {496.864,611.651,901.701,4004.508,4245.531,5701.471,8435.313,19549.907,21006.708,28104.019,50805.343,52559.642,41842.193,70971.661};
+    double q10_exec_time2_saved[] = {1119.738,1217.085,1486.951,10760.068,10558.173,11383.756,14007.624,52222.365,53091.169,58041.256,131299.554,139747.236,69131.387,149850.802};
+    double q11_exec_time2_saved[] = {494.269,539.124,612.425,4359.527,4342.357,4744.796,5352.497,20963.225,21381.717,25301.286,48744.342,55878.196,26948.188,53292.176};
+
+    double q1_exec_time3_saved[] = {43052.146,48559.641,56551.836,57944.83,89096.379,93323.808,105511.015,139562.096,139332.114,156243.598,166006.466,229580.474,240975.25,243597.821,262546.25,404717.703,399187.996,1205969.281};
+    double q2_exec_time3_saved[] = {33194.21,30649.077,46062.151,39115.23,76771.871,58409.181,84474.642,92798.449,87900.828,128149.336,150702.284,144551.863,195283.74,210084.337,180343.384,346516.425,265797.913,800323.03};
+    double q3_exec_time3_saved[] = {45069.838,50551.571,61687.493,62449.838,90084.871,98159.046,111329.742,149521.546,148941.095,169629.422,180306.385,230095.489,257091.821,266163.218,288725.023,433311.225,430005.474,1302605.243};
+    double q4_exec_time3_saved[] = {38924.262,31569.845,48325.145,41669.582,76962.051,60774.615,90139.834,100548.227,91243.221,134853.333,151588.898,149945.698,205844.827,224367.422,189670.398,372984.949,283135.547,910734.295};
+    double q5_exec_time3_saved[] = {47366.668,65646.335,75013.658,62513.73,95989.188,125173.482,136885.635,144649.888,191152.158,205193.227,195162.505,315766.676,314395.783,294664.718,294474.647,470954.754,441835.294,1367070.923};
+    double q6_exec_time3_saved[] = {42560.047,40260.792,64115.814,41905.492,82042.596,76699.789,108547.11,96630.489,115235.281,160100.087,166929.56,187861.985,252727.297,247056.389,195290.883,404462.286,294431.575,909565.503};
+    double q7_exec_time3_saved[] = {55270.125,69992.293,79871.8,69447.435,102812.695,135122.104,148150.643,157916.653,195579.157,248551.748,216450.355,329552.087,334101.326,310184.728,312772.712,513220.959,472904.653,1389510.781};
+    double q8_exec_time3_saved[] = {45133.391,43267.373,61718.12,46049.951,89405.264,80657.687,118796.035,102993.039,119596.658,192419.949,179792.857,197538.799,260710.662,263847.857,209855.32,409701.388,312560.992,989253.662};
+    double q9_exec_time3_saved[] = {70971.661,106375.62,119138.578,88398.364,152488.774,207143.648,223803.843,213980.835,298420.073,349014.554,290525.441,487207.765,486045.704,447861.125,403334.148,733679.654,627416.194,1882207.197};
+    double q10_exec_time3_saved[] = {149850.802,282640.036,275979.924,145871.085,283570.55,509485.797,537122.691,351843.433,757954.229,886159.039,570943.255,1293367.083,1330796.074,887192.176,678072.576,1306695.821,1007951.792,3278640.336};
+    double q11_exec_time3_saved[] = {53292.176,113040.877,116197.875,57931.305,115217.056,218831.023,220401.138,128568.488,328470.413,368643.622,247930.689,539001.221,535615.678,369869.059,272769.575,515894.317,425552.188,1187134.287};
+    
 
     int* data1_len = (int *)malloc(sizeof(int) * QUERYNUM);
     int* data2_len = (int *)malloc(sizeof(int) * QUERYNUM);
@@ -3509,7 +3654,7 @@ void add_new_data(double** num1, double** num2, double** num3,
         for (int i = 0 ; i < data1_len ; i++){
             if (data_num1[i] >= new_data_num_add){
                 if (data_num1[i] == new_data_num_add){
-                    printf("data already existed -> change to new\n");
+                    //printf("data already existed -> change to new\n");
                     q1_exec_time1[i] = (q1_exec_time1[i] + new_exec_time_add) / 2;
                     break;
                 } else{
@@ -3519,7 +3664,7 @@ void add_new_data(double** num1, double** num2, double** num3,
                     }
                     data_num1[i] = new_data_num_add;
                     q1_exec_time1[i] = new_exec_time_add;
-                    (*len1)++;
+                    data1_len++;
                     break;
                 }
             }
@@ -3529,7 +3674,7 @@ void add_new_data(double** num1, double** num2, double** num3,
         for (int i = 0 ; i < data2_len ; i++){
             if (data_num2[i] >= new_data_num_add){
                 if (data_num2[i] == new_data_num_add){
-                    printf("data already existed -> change to new\n");
+                    //printf("data already existed -> change to new\n");
                     q1_exec_time2[i] = (q1_exec_time2[i] + new_exec_time_add) / 2;
                     break;
                 } else{
@@ -3539,7 +3684,7 @@ void add_new_data(double** num1, double** num2, double** num3,
                     }
                     data_num2[i] = new_data_num_add;
                     q1_exec_time2[i] = new_exec_time_add;
-                    (*len2)++;
+                    data2_len++;
                     break;
                 }
             }
@@ -3548,7 +3693,7 @@ void add_new_data(double** num1, double** num2, double** num3,
         for (int i = 0 ; i < data3_len ; i++){
             if (data_num3[i] >= new_data_num_add){
                 if (data_num3[i] == new_data_num_add){
-                    printf("data already existed -> change to new\n");
+                    //printf("data already existed -> change to new\n");
                     q1_exec_time3[i] = (q1_exec_time3[i] + new_exec_time_add) / 2;
                     break;
                 } else{
@@ -3558,7 +3703,7 @@ void add_new_data(double** num1, double** num2, double** num3,
                     }
                     data_num3[i] = new_data_num_add;
                     q1_exec_time3[i] = new_exec_time_add;
-                    (*len3)++;
+                    data3_len++;
                     break;
                 }
             }
@@ -3573,11 +3718,92 @@ void add_new_data(double** num1, double** num2, double** num3,
                      &data_num2, &data_num3, &q1_exec_time2, &q1_exec_time3, &exec_coef2, &exec_coef3, false)){
         printf("Error occured in adj 2\n");
     }
-	    
+    /*
+    printf("-----------------------------------\n");
+    for (int x = 0 ; x < EXEC_ORDER + 1 ; x++){
+        printf("%e ", exec_coef1[x]);
+    }
+    printf("\n");
+    for (int x = 0 ; x < EXEC_ORDER + 1 ; x++){
+        printf("%e ", exec_coef2[x]);
+    }
+    printf("\n");
+    for (int x = 0 ; x < EXEC_ORDER + 1 ; x++){
+        printf("%e ", exec_coef3[x]);
+    }
+    printf("\n");
+    printf("-----------------------------------\n");
+    */
     *coef1 = exec_coef1;
     *coef2 = exec_coef2;
     *coef3 = exec_coef3;
+
 }
+
+// debugging function
+void print_errors(double* data_num, double* exec_time, int data_len, double* exec_coef, bool first_flag){
+
+    if (polyfit(data_len, data_num, exec_time, EXEC_ORDER + 1, exec_coef)){
+        printf("Error occured in polyfit\n");
+    }
+    double *assume_result = polyval_multi(data_num, exec_time, data_len, exec_coef);
+    /*
+    printf("Approx data: ");
+    for (int j = 0 ; j < data_len ; j++){
+        if (j == (data_len - 1)){
+            printf("%.3f\n", assume_result[j]);
+        } else{
+            printf("%.3f, ", assume_result[j]);
+        }
+    }*/
+
+    double partial_error = 0;
+    double total_error = 0;
+    double total_error_rate = 0;
+    //printf("partial error: ");
+    for (int j = 0 ; j < data_len ; j++){
+        if (assume_result[j] < 0){
+            assume_result[j] = 0;
+        }
+        partial_error = ABS(exec_time[j] - assume_result[j]);
+        if ((!first_flag) & (j == 0)){
+            continue;
+        }/*
+        if (j == (data_len - 1)){
+            printf("%.3f\n", partial_error);
+        } else{
+            printf("%.3f, ", partial_error);
+        }*/
+        total_error += partial_error;
+    }
+    //printf("partial error rate: ");
+    for (int j = 0 ; j < data_len ; j++){
+        partial_error = ABS(exec_time[j] - assume_result[j]);
+        if ((!first_flag) & (j == 0)){
+            continue;
+        }/*
+        if (j == (data_len - 1)){
+            printf("%.3f\n", ((partial_error / exec_time[j]) * 100));
+        } else{
+            printf("%.3f, ", ((partial_error / exec_time[j]) * 100));
+        }*/
+        total_error_rate += ((partial_error / exec_time[j]) * 100);
+    }
+
+
+    if (first_flag){
+        //printf("total avg partial error: %.3f\n", total_error/data_len);
+        printf("total avg partial error rate: %.3f\n", total_error_rate/data_len);
+    } else{
+        //printf("total avg partial error: %.3f\n", total_error/(data_len - 1));
+        printf("total avg partial error rate: %.3f\n", total_error_rate/(data_len-1));
+    }
+
+    free(assume_result);
+    
+    return;
+}
+
 
 /* ----------------------------------------------------------------
  *		routines to obtain user input
@@ -4562,6 +4788,9 @@ exec_simple_query(const char *query_string)
 		// --------------------------------------------------------------------------
 		if (HW_ACTIVATED)
 			sw_stack_for_hw(query_string, querytree_list);
+			if (HW_BREAK_EXEC){
+				return;
+			}
 		
 		plantree_list = pg_plan_queries(querytree_list,
 										CURSOR_OPT_PARALLEL_OK, NULL);
@@ -7709,98 +7938,80 @@ PostgresMain(int argc, char *argv[],
 		} else if (SIM_ADAPTIVE_RANGE){
 			if (!inited){
 				printf("arg case 1/0 - simulate adaptive range once");
-				get_init_values(&data_num1, &data_num2, &data_num3, &exec_time1, &exec_time2, &exec_time3, &data1_len, &data2_len, &data3_len);
-				
-				exec_coef1 = (double **)malloc(sizeof(double) * QUERYNUM);
-				exec_coef2 = (double **)malloc(sizeof(double) * QUERYNUM);
-				exec_coef3 = (double **)malloc(sizeof(double) * QUERYNUM);
 
 				int query_num = Q1;
+
+				double** exec_coef1 = (double **)malloc(sizeof(double) * QUERYNUM);
+				double** exec_coef2 = (double **)malloc(sizeof(double) * QUERYNUM);
+				double** exec_coef3 = (double **)malloc(sizeof(double) * QUERYNUM);
+
+				for (int i = 0 ; i < QUERYNUM ; i++){
+					exec_coef1[i] = (double *)malloc(sizeof(double) * DATASIZE);
+					exec_coef2[i] = (double *)malloc(sizeof(double) * DATASIZE);
+					exec_coef3[i] = (double *)malloc(sizeof(double) * DATASIZE);
+				}
+
 				
-				printf("Init Restult\n");
-				print_data(data_num1[query_num], data1_len[query_num]);
-				printf("data1 len: %d\n", data1_len[query_num]);
+    			get_init_values(&data_num1, &data_num2, &data_num3, &exec_time1, &exec_time2, &exec_time3, &data1_len, &data2_len, &data3_len);
 
-				print_data(data_num2[query_num], data2_len[query_num]);
-				printf("data2 len: %d\n", data2_len[query_num]);
+				printf("Before Adjust\n");
+				for (int i = 0 ; i < QUERYNUM ; i++){
+					if (polyfit(data1_len[i], data_num1[i], exec_time1[i], EXEC_ORDER + 1, exec_coef1[i])){
+						printf("Error occured in polyfit\n");
+					}
+					if (polyfit(data2_len[i], data_num2[i], exec_time2[i], EXEC_ORDER + 1, exec_coef2[i])){
+						printf("Error occured in polyfit\n");
+					}
+					if (polyfit(data3_len[i], data_num3[i], exec_time3[i], EXEC_ORDER + 1, exec_coef3[i])){
+						printf("Error occured in polyfit\n");
+					}
 
-				print_data(data_num3[query_num], data3_len[query_num]);
-				printf("data3 len: %d\n", data3_len[query_num]);
+					printf("-----------------------------------\n");
+					printf("Query Q%d (len: %d / %d / %d)\n", i + 1, data1_len[i], data2_len[i], data3_len[i]);
+					print_errors(data_num1[i], exec_time1[i], data1_len[i], exec_coef1[i], true);
+					print_errors(data_num2[i], exec_time2[i], data2_len[i], exec_coef2[i], false);
+					print_errors(data_num3[i], exec_time3[i], data3_len[i], exec_coef3[i], false);
+					printf("-----------------------------------\n");
+				}
 				
-				if (adjust_range(data_num1[query_num], data_num2[query_num], exec_time1[query_num], exec_time2[query_num], &data1_len[query_num], &data2_len[query_num],
-								&data_num1[query_num], &data_num2[query_num], &exec_time1[query_num], &exec_time2[query_num], &exec_coef1[query_num], &exec_coef2[query_num], true)){
-					printf("Error occured in adj 1\n");
-				}
-				if (adjust_range(data_num2[query_num], data_num3[query_num], exec_time2[query_num], exec_time3[query_num], &data2_len[query_num], &data3_len[query_num],
-								&data_num2[query_num], &data_num3[query_num], &exec_time2[query_num], &exec_time3[query_num], &exec_coef2[query_num], &exec_coef3[query_num], false)){
-					printf("Error occured in adj 2\n");
-				}
-				
-				printf("Final Restult\n");
-				print_data(data_num1[query_num], data1_len[query_num]);
-				for (int x = 0 ; x < EXEC_ORDER + 1 ; x++){
-					printf("%e ", exec_coef1[query_num][x]);
-				}
-				printf("\n");
-				printf("data1 len: %d\n", data1_len[query_num]);
-
-				print_data(data_num2[query_num], data2_len[query_num]);
-				for (int y = 0 ; y < EXEC_ORDER + 1 ; y++){
-					printf("%e ", exec_coef2[query_num][y]);
-				}
-				printf("\n");
-				printf("data2 len: %d\n", data2_len[query_num]);
-
-				print_data(data_num3[query_num], data3_len[query_num]);
-				for (int z = 0 ; z < EXEC_ORDER + 1 ; z++){
-					printf("%e ", exec_coef3[query_num][z]);
-				}
-				printf("\n");
-				printf("data3 len: %d\n", data3_len[query_num]);
-				
-				double new_data_num_predict = 375000000;
-				double new_exec_time_predict = 0;
-
-				if (new_data_num_predict <= data_num2[query_num][0]){
-					new_exec_time_predict = polyval(new_data_num_predict, exec_coef1[query_num]);
-				} else if (new_data_num_predict <= data_num3[query_num][0]){
-					new_exec_time_predict = polyval(new_data_num_predict, exec_coef2[query_num]);
-				} else{
-					new_exec_time_predict = polyval(new_data_num_predict, exec_coef3[query_num]);
+				for (int i = 0 ; i < QUERYNUM ; i++){
+					free(exec_coef1[i]);
+					free(exec_coef2[i]);
+					free(exec_coef3[i]);
 				}
 
-				printf("Predicted for %lf -> %lf\n", new_data_num_predict, new_exec_time_predict);
-
-				double new_data_num_add = 35000 / 1000;
-				double new_exec_time_add = 39.5;
-
-				add_new_data(&data_num1[query_num], &data_num2[query_num],  &data_num3[query_num], 
-							&exec_time1[query_num], &exec_time2[query_num], &exec_time3[query_num],
-							&data1_len[query_num], &data2_len[query_num], &data3_len[query_num],
-							&exec_coef1[query_num], &exec_coef2[query_num],  &exec_coef3[query_num],
-							new_data_num_add, new_exec_time_add);
-
-				printf("Final Restult 2\n");
-				print_data(data_num1[query_num], data1_len[query_num]);
-				for (int x = 0 ; x < EXEC_ORDER + 1 ; x++){
-					printf("%e ", exec_coef1[query_num][x]);
+				for (int i = 0 ; i < QUERYNUM ; i++){
+					printf("Query Q%d\n", i + 1);
+					if (adjust_range(data_num1[i], data_num2[i], exec_time1[i], exec_time2[i], &data1_len[i], &data2_len[i],
+									&data_num1[i], &data_num2[i], &exec_time1[i], &exec_time2[i], &exec_coef1[i], &exec_coef2[i], true)){
+						printf("Error occured in adj 1\n");
+					}
+					if (adjust_range(data_num2[i], data_num3[i], exec_time2[i], exec_time3[i], &data2_len[i], &data3_len[i],
+									&data_num2[i], &data_num3[i], &exec_time2[i], &exec_time3[i], &exec_coef2[i], &exec_coef3[i], false)){
+						printf("Error occured in adj 2\n");
+					}
+					printf("\n");
 				}
-				printf("\n");
-				printf("data1 len: %d\n", data1_len[query_num]);
 
-				print_data(data_num2[query_num], data2_len[query_num]);
-				for (int y = 0 ; y < EXEC_ORDER + 1 ; y++){
-					printf("%e ", exec_coef2[query_num][y]);
-				}
-				printf("\n");
-				printf("data2 len: %d\n", data2_len[query_num]);
+				printf("After Adjust\n");
+				for (int i = 0 ; i < QUERYNUM ; i++){
+					if (polyfit(data1_len[i], data_num1[i], exec_time1[i], EXEC_ORDER + 1, exec_coef1[i])){
+						printf("Error occured in polyfit\n");
+					}
+					if (polyfit(data2_len[i], data_num2[i], exec_time2[i], EXEC_ORDER + 1, exec_coef2[i])){
+						printf("Error occured in polyfit\n");
+					}
+					if (polyfit(data3_len[i], data_num3[i], exec_time3[i], EXEC_ORDER + 1, exec_coef3[i])){
+						printf("Error occured in polyfit\n");
+					}
 
-				print_data(data_num3[query_num], data3_len[query_num]);
-				for (int z = 0 ; z < EXEC_ORDER + 1 ; z++){
-					printf("%e ", exec_coef3[query_num][z]);
+					printf("-----------------------------------\n");
+					printf("Query Q%d (len: %d / %d / %d)\n", i + 1, data1_len[i], data2_len[i], data3_len[i]);
+					print_errors(data_num1[i], exec_time1[i], data1_len[i], exec_coef1[i], true);
+					print_errors(data_num2[i], exec_time2[i], data2_len[i], exec_coef2[i], false);
+					print_errors(data_num3[i], exec_time3[i], data3_len[i], exec_coef3[i], false);
+					printf("-----------------------------------\n");
 				}
-				printf("\n");
-				printf("data3 len: %d\n", data3_len[query_num]);
 
 				inited = true;
 			}
@@ -7898,7 +8109,7 @@ PostgresMain(int argc, char *argv[],
 							double new_exec_time_add = ((double)(query_end_time - query_start_time) / CLOCKS_PER_SEC) * 1000;
 							printf("arg case 1/1 - new data come (query num: %d / data num: %f / execute time: %f)\n", query_num + 1, num_rows, new_exec_time_add);
 
-							double new_data_num_add = num_rows / 1000;
+							double new_data_num_add = num_rows;
 							add_new_data(&data_num1[query_num], &data_num2[query_num], &data_num3[query_num], 
 										&exec_time1[query_num], &exec_time2[query_num], &exec_time3[query_num],
 										&data1_len[query_num], &data2_len[query_num], &data3_len[query_num],
@@ -7914,7 +8125,7 @@ PostgresMain(int argc, char *argv[],
 							double new_exec_time_add = ((double)(query_end_time - query_start_time) / CLOCKS_PER_SEC) * 1000;
 							printf("arg case 0/1 - new data come (query num: %d / data num: %f / execute time: %f)\n", query_num + 1, num_rows, new_exec_time_add);
 
-							double new_data_num_add = num_rows / 1000;
+							double new_data_num_add = num_rows;
 							add_new_data(&data_num1[query_num], &data_num2[query_num], &data_num3[query_num], 
 										&exec_time1[query_num], &exec_time2[query_num], &exec_time3[query_num],
 										&data1_len[query_num], &data2_len[query_num], &data3_len[query_num],
