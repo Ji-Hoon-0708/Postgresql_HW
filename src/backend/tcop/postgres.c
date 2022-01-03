@@ -233,9 +233,7 @@ static char *tree_table_name;
  *------------------------------------------------------*/
 
 #define NONE				0
-
 #define MAX_OP_NUM			2
-
 #define MAX_NAME_LEN		30
 
 /*--------------------------------------------------------
@@ -413,8 +411,6 @@ static char *tree_table_name;
 // 11: not sim, but do init using pre-measured data
 #define SIM_ADAPTIVE_RANGE 1
 #define USE_ADAPTIVE_RANGE 1
-// for predictor time measurement
-#define HW_BREAK_EXEC 1
 
 typedef struct matrix_s{
 	int	rows;
@@ -456,13 +452,6 @@ static clock_t query_end_time;
 
 static bool num_rows_recorded = false;
 static double num_rows;
-
-// wrapper function
-void set_num_rows(uint64 input)
-{
-	num_rows_recorded = true;
-	num_rows = input;
-}
 
  /*--------------------------------------------------------
   *	Structure for HW-aware SW stack
@@ -552,7 +541,6 @@ hw_strcmp(char* str1, char* str2) {
 	return compare;
 }
 
-
 static int
 hw_queryhashmap(char* str, int query_cluster) {
 	if (hw_strcmp(str, (char*)"SELECT"))
@@ -619,7 +607,9 @@ hw_filterhashmap(char* str) {
 		return 0;
 }
 
+//////////////////////////////////////////////////////////////////
 // operation info extracting functionality
+//////////////////////////////////////////////////////////////////
 
 static void 
 init_operation_info(struct operation_info *info){
@@ -715,7 +705,6 @@ extract_operation_info(char** word_array, int word_size, struct operation_info *
 		query_cluster = hw_queryhashmap(word_array[i], query_cluster);
 		switch (query_cluster){
 			case NONE:
-				//printf("cluster: NONE\n");
 				info->hw_support = false;
 				if (i == 0){
 					return;
@@ -723,20 +712,12 @@ extract_operation_info(char** word_array, int word_size, struct operation_info *
 				i += 1;
 				break;
 			case SELECT:{
-				//printf("cluster: SELECT\n");
 				int query_check = 0;
-				//printf("%s\n", word_array[i + 1]);
 				query_check = hw_ophashmap(word_array[i + 1]);
-				//printf("select op check - %d\n", query_check);
 				if (query_check != NONE){ // madlib operation
 					info->hw_support = true;
 					info->hw_operation = query_check;
-					//printf("operation: %d\n", info->hw_operation);
 					if ((info->hw_operation == LINREGR) | (info->hw_operation == LOGREGR)){
-						//printf("--regression--\n");
-						//info->model_col_name = (char *)malloc(sizeof(char) * MAX_NAME_LEN);
-						//strcpy(info->model_col_name, word_array[i + 2]);
-						//printf("model_col_name: %s\n", info->model_col_name);
 						int arr_len = 0;
 						i += 2;
 						if (hw_strcmp(word_array[i], (char*)"ARRAY")){
@@ -745,19 +726,14 @@ extract_operation_info(char** word_array, int word_size, struct operation_info *
 								   (!hw_strcmp(word_array[i + 1 + arr_len], (char*)"ARRAY"))){
 								arr_len++;
 							}
-							//printf("arr_len: %d\narr: ", arr_len);
 							info->model_col_len = arr_len;
 							info->model_col_name = (char **)malloc(sizeof(char *) * arr_len);
 							for (int k = 0 ; k < arr_len ; k++){
 								info->model_col_name[k] = (char *)malloc(sizeof(char) * MAX_NAME_LEN);
 								strcpy(info->model_col_name[k], word_array[i + 1 + k]);
-								//printf("[%s] ", info->data_col_name[k]);
 							}
-							//printf("\n");
 							i += (1 + arr_len);
 						} else if (hw_strcmp(word_array[i], (char*)"coef")){
-							//printf("support? %d\n", info->hw_support);
-							//printf("come----------------------------------------\n");
 							arr_len = 1;
 							info->model_col_len = arr_len;
 							info->model_col_name = (char **)malloc(sizeof(char *) * arr_len);
@@ -772,15 +748,12 @@ extract_operation_info(char** word_array, int word_size, struct operation_info *
 								   (!hw_strcmp(word_array[i + 1 + arr_len], (char*)"ARRAY"))){
 								arr_len++;
 							}
-							//printf("arr_len: %d\narr: ", arr_len);
 							info->data_col_len = arr_len;
 							info->data_col_name = (char **)malloc(sizeof(char *) * arr_len);
 							for (int k = 0 ; k < arr_len ; k++){
 								info->data_col_name[k] = (char *)malloc(sizeof(char) * MAX_NAME_LEN);
 								strcpy(info->data_col_name[k], word_array[i + 1 + k]);
-								//printf("[%s] ", info->data_col_name[k]);
 							}
-							//printf("\n");
 							i += (1 + arr_len);
 						} else if (hw_strcmp(word_array[i], (char*)"coef")){
 							arr_len = 1;
@@ -791,17 +764,13 @@ extract_operation_info(char** word_array, int word_size, struct operation_info *
 							i += arr_len;
 						}
 					} else if ((info->hw_operation == SVM) | (info->hw_operation == MLP) | (info->hw_operation == TREE)){
-						//printf("--SVM/MLP--\n");
 						info->model_table_name = (char *)malloc(sizeof(char) * MAX_NAME_LEN);
 						strcpy(info->model_table_name, word_array[i + 2]);
-						//printf("model_table_name: %s\n", info->model_table_name);
 						info->data_table_name = (char *)malloc(sizeof(char) * MAX_NAME_LEN);
 						strcpy(info->data_table_name, word_array[i + 3]);
-						//printf("data_table_name: %s\n", info->data_table_name);
 						if ((info->hw_operation == SVM) | (info->hw_operation == MLP)){
 							info->id_col_name = (char *)malloc(sizeof(char) * MAX_NAME_LEN);
 							strcpy(info->id_col_name, word_array[i + 4]);
-							//printf("id_col_name: %s\n", info->id_col_name);
 							info->output_table_name = (char *)malloc(sizeof(char) * MAX_NAME_LEN);
 							strcpy(info->output_table_name, word_array[i + 5]);	
 						} else{
@@ -818,7 +787,6 @@ extract_operation_info(char** word_array, int word_size, struct operation_info *
 				} else if (query_check = hw_aggrhashmap(word_array[i + 1])){ // aggr operation
 					info->aggr_flag = true;
 					info->aggr_operation = query_check;
-					//printf("aggresion: %d\n", info->aggr_operation);
 
 					char* aggr_table = (char *)malloc(sizeof(char) * MAX_NAME_LEN);
 					strcpy(aggr_table, word_array[i + 2]);
@@ -828,11 +796,9 @@ extract_operation_info(char** word_array, int word_size, struct operation_info *
 					while (word_token != NULL){
 						if (j == 0){
 							info->aggr_table_name = (char *)malloc(sizeof(char) * MAX_NAME_LEN);
-							//printf("aggr1: %s\n", word_token);
 							strcpy(info->aggr_table_name, word_token);
 						} else if (j == 1){
 							info->aggr_table_col = (char *)malloc(sizeof(char) * MAX_NAME_LEN);
-							//printf("aggr2: %s\n", word_token);
 							strcpy(info->aggr_table_col, word_token);
 						} else{
 							printf("not considered case occured\n");
@@ -850,22 +816,18 @@ extract_operation_info(char** word_array, int word_size, struct operation_info *
 				break;
 			}
 			case FROM:
-				//printf("cluster: FROM\n");
 				if ((info->hw_support) & 
 				   ((info->hw_operation == LINREGR) | (info->hw_operation == LOGREGR))){
 				    info->model_table_name = (char *)malloc(sizeof(char) * MAX_NAME_LEN);
 					strcpy(info->model_table_name, word_array[i + 1]);
-					//printf("model_table_name: %s\n", info->model_table_name);
 					info->data_table_name = (char *)malloc(sizeof(char) * MAX_NAME_LEN);
 					strcpy(info->data_table_name, word_array[i + 2]);
-					//printf("data_table_name: %s\n", info->data_table_name);
 					i += 3;			
 				} else{
 					i += 1;
 				}
 				break;
 			case WHERE:
-				//printf("cluster: WHERE\n");
 				info->filter_flag = true;
 				char* filter_table = (char *)malloc(sizeof(char) * MAX_NAME_LEN);
 				strcpy(filter_table, word_array[i + 1]);
@@ -875,11 +837,9 @@ extract_operation_info(char** word_array, int word_size, struct operation_info *
 				while (word_token != NULL){
 					if (j == 0){
 						info->filter_table_name = (char *)malloc(sizeof(char) * MAX_NAME_LEN);
-						//printf("filter1: %s\n", word_token);
 						strcpy(info->filter_table_name, word_token);
 					} else if (j == 1){
 						info->filter_col_name = (char *)malloc(sizeof(char) * MAX_NAME_LEN);
-						//printf("filter2: %s\n", word_token);
 						strcpy(info->filter_col_name, word_token);
 					} else{
 						printf("not considered case occured\n");
@@ -890,17 +850,13 @@ extract_operation_info(char** word_array, int word_size, struct operation_info *
 				}
 				free(filter_table);
 				info->filter_operation = hw_filterhashmap(word_array[i + 2]);
-				//printf("filter_operation: %d\n", info->filter_operation);
 				info->filter_value = atof(word_array[i + 3]);
-				//printf("filter value: %f\n", info->filter_value);
 				i += 4;
 				break;
 			case GROUP_BY:
-				//printf("cluster: GROUP_BY\n");
 				info->hw_support = false;
 				break;
 			case ORDER_BY:
-				//printf("cluster: ORDER_BY\n");
 				info->hw_support = false;
 				break;
 			default:
@@ -915,7 +871,8 @@ extract_operation_info(char** word_array, int word_size, struct operation_info *
 	return;
 }
 
-int get_query_num(struct operation_info info){
+int 
+get_query_num(struct operation_info info){
 	int query_num = -1;
 	if (info.hw_support){
 		switch (info.hw_operation){
@@ -958,7 +915,8 @@ int get_query_num(struct operation_info info){
 	return query_num;
 }
 
-void printf_op_info(struct operation_info info){
+void 
+printf_op_info(struct operation_info info){
 	printf("\t-------operation info debugging-------\n\t");
 
 	printf("hw_support: %s\n\t", info.hw_support ? "True" : "False");
@@ -1054,7 +1012,9 @@ void printf_op_info(struct operation_info info){
 	printf("--------------------------------------\n");
 }
 
+//////////////////////////////////////////////////////////////////
 // sw stack + tree table query creator functionality
+//////////////////////////////////////////////////////////////////
 
 static void
 hw_query_modification(char* data_table_name, char* model_table_name, char* new_query) {
@@ -1097,7 +1057,7 @@ calculate_relation_size(RelFileNode *rfn, BackendId backend, ForkNumber forknum)
                         (errcode_for_file_access(),
                          errmsg("could not stat file \"%s\": %m", pathname)));
         }
-		printf("stat_check: %ld (%d)\n", fst.st_size, segcount);
+		//printf("stat_check: %ld (%d)\n", fst.st_size, segcount);
         totalsize += fst.st_size;
     }
 
@@ -1182,7 +1142,6 @@ hw_rtable_extract(Query* query, int* rtable_id, int* rtable_relid, char** rtable
 
 	int idx = 0;
 	foreach(rtable_list, query->rtable) {
-		//printf("hw stack debug - hw_rtable_extract\nidx: %d\n", idx);
 		RangeTblEntry* rtbl = lfirst_node(RangeTblEntry, rtable_list);
 		
 		rtable_id[idx] = idx;
@@ -1203,7 +1162,6 @@ hw_rtable_extract(Query* query, int* rtable_id, int* rtable_relid, char** rtable
 			strcpy(rtable_colname[idx][col_idx], colname);
 			col_idx++;			
 		}
-		//printf("check, arr: %d, data: %d\n", rtable_relid[idx], rtbl->relid);
 		table_size[idx] = hw_get_table_size(rtable_relid[idx]);
 		idx++;
 	}
@@ -1219,7 +1177,9 @@ hw_str_delete(char* str, char ch) {
 	}
 }
 
+//////////////////////////////////////////////////////////////////
 // memory dump functionality
+//////////////////////////////////////////////////////////////////
 
 static void 
 printchar(unsigned char c){
@@ -1261,7 +1221,9 @@ dumpmem(unsigned char *buff, int len){
 	printf("\n");
 } 
 
-// sw stack + tree table query creator functionality
+//////////////////////////////////////////////////////////////////
+// tree table query creator functionality
+//////////////////////////////////////////////////////////////////
 
 static Page
 get_page_from_raw(bytea *raw_page)
@@ -1329,7 +1291,7 @@ get_raw_from_rel_with_bias(Relation rel, int cnt){
 }
 
 static void 
-int_debug_print(int* variable, int var_len, int typeflag){ // 0 for int / 1 for hex
+int_debug_print(int* variable, int var_len, int typeflag){ // typeflag: 0 for int, 1 for hex
 	int linecnt = 0;
 	for (int print_i = 0 ; print_i < var_len ; print_i++){
 		if (linecnt >= 10){
@@ -1352,7 +1314,7 @@ int_debug_print(int* variable, int var_len, int typeflag){ // 0 for int / 1 for 
 }
 
 static void 
-float_debug_print(float* variable, int var_len, int typeflag){ // 0 for float / 1 for hex
+float_debug_print(float* variable, int var_len, int typeflag){ // typeflag: 0 for float, 1 for hex
 	int linecnt = 0;
 	for (int print_i = 0 ; print_i < var_len ; print_i++){
 		if (linecnt >= 10){
@@ -1379,12 +1341,10 @@ static char *
 addr_auto_padder(ItemId item_id, char* now_data_addr, char *item_base_addr, int num_nodes, int data_size){
 	int now_filled = (now_data_addr - item_base_addr);
 	int will_filled = num_nodes * data_size;
-	//printf("%d %d %d\n", now_filled, will_filled, item_id->lp_len);
 	if (now_filled + will_filled >= item_id->lp_len){
 		// item change will occur
 		int remain = item_id->lp_len - now_filled;
 		int padding = remain % data_size;
-		//printf("padding %d\n", padding);
 		return now_data_addr + padding;
 	} else{
 		return now_data_addr;
@@ -1395,8 +1355,6 @@ static bool
 carefully_incl_addr(ItemId item_id, char* item_base_addr, char *now_data_addr, int incl_num){
 	if (now_data_addr + incl_num >= item_base_addr + item_id->lp_len){
 		printf("-------item change tried-------\n");
-		//printf("item_base_addr: %p\nitem_boubdary: %p\nnow_data_addr: %p\nincl_result: %p\n", item_base_addr, item_base_addr + item_id->lp_len, now_data_addr, now_data_addr + incl_num);
-		//printf("-----------------------------\n");
 		return false;
 	} else{
 		return true;
@@ -1406,15 +1364,11 @@ carefully_incl_addr(ItemId item_id, char* item_base_addr, char *now_data_addr, i
 static char*
 tree_table_query_creator(){
 
-	printf("creator!\n");
-
 	char *train_select_query = (char *)malloc(sizeof(char) * 100);
 	strcpy(train_select_query, "SELECT * FROM ");
 	strcat(train_select_query, tree_table_name);
 	strcat(train_select_query, ";");	
 	free(tree_table_name);
-
-	printf("using query: %s\n", train_select_query);
 
 	start_xact_command();
 
@@ -1422,13 +1376,12 @@ tree_table_query_creator(){
 	ListCell *parsetree_item_tree;
 	List *querytree_list_tree;
 	parsetree_list_tree = pg_parse_query(train_select_query);
-	//MemoryContextSwitchTo(oldcontext);
+
 	foreach(parsetree_item_tree, parsetree_list_tree) {
 		RawStmt *parsetree_tree = lfirst_node(RawStmt, parsetree_item_tree);
 		querytree_list_tree = pg_analyze_and_rewrite(parsetree_tree, train_select_query, NULL, 0, NULL);
 	}
-	
-	//TRACE_POSTGRESQL_QUERY_DONE(train_select_query);
+
 	ListCell* query_list_tree;
 	ListCell* rtable_list;
 	Oid tree_table_oid;
@@ -1441,7 +1394,6 @@ tree_table_query_creator(){
 	}
 	free(train_select_query);
 	
-	printf("tree_table_creator - oid: %d\n", tree_table_oid);
 	Relation tree_table;
 	if (!(tree_table = try_relation_open(tree_table_oid, AccessShareLock))){
 		printf("tree_table_creator - Oid error occured\n");
@@ -1464,16 +1416,12 @@ tree_table_query_creator(){
 		LocationIndex tree_data_page_lower = tree_data_page_header->pd_lower;
 		LocationIndex tree_data_page_upper = tree_data_page_header->pd_upper;	
 		
-		printf("tree_data_extractor - toast page debug\ntree_table_lower: %x\ntree_table_upper: %x\ntree_data_item_num: %d\n", 
-							tree_data_page_lower, tree_data_page_upper, tree_data_item_num);
-
 		int toast_now_item_offset = 1;
 		ItemId toast_now_item_id = PageGetItemId(tree_data_page, toast_now_item_offset);
 		char *toast_item_rawdata = ((char *) PageGetItem(tree_data_page, toast_now_item_id));
 		HeapTupleHeader toast_item_header = (HeapTupleHeader) toast_item_rawdata;
 		
 		char *now_data_addr = toast_item_rawdata + SizeofHeapTupleHeader + 17;
-		//printf("addr offset: %x\n", (char *)now_data_addr - (char *)tree_data_page);
 		uint16_t tree_depth = *((uint16_t *)(now_data_addr));
 		int num_datas = 7;
 		if (!carefully_incl_addr(toast_now_item_id, toast_item_rawdata, now_data_addr, 2)){
@@ -1490,7 +1438,6 @@ tree_table_query_creator(){
 		} else{
 			now_data_addr += 2;
 		}
-		//printf("addr offset: %x\n", (char *)now_data_addr - (char *)tree_data_page);
 		uint16_t n_y_labels = *((uint16_t *)(now_data_addr));
 		if (!carefully_incl_addr(toast_now_item_id, toast_item_rawdata, now_data_addr, 2)){
 			// item change
@@ -1506,7 +1453,7 @@ tree_table_query_creator(){
 		} else{
 			now_data_addr += 2;
 		}
- 		//printf("addr offset: %x\n", (char *)now_data_addr - (char *)tree_data_page);
+
 		if (!carefully_incl_addr(toast_now_item_id, toast_item_rawdata, now_data_addr, 2)){
 			// item change
 			if ((toast_now_item_offset + 1) <= tree_data_item_num){
@@ -1521,7 +1468,7 @@ tree_table_query_creator(){
 		} else{
 			now_data_addr += 2;
 		}
-    	//printf("addr offset: %x\n", (char *)now_data_addr - (char *)tree_data_page);
+
 		if (!carefully_incl_addr(toast_now_item_id, toast_item_rawdata, now_data_addr, 2)){
 			// item change
 			if ((toast_now_item_offset + 1) <= tree_data_item_num){
@@ -1536,7 +1483,7 @@ tree_table_query_creator(){
 		} else{
 			now_data_addr += 2;
 		}
-    	//printf("addr offset: %x\n", (char *)now_data_addr - (char *)tree_data_page);
+
 		if (!carefully_incl_addr(toast_now_item_id, toast_item_rawdata, now_data_addr, 4)){
 			// item change
 			if ((toast_now_item_offset + 1) <= tree_data_item_num){
@@ -1557,7 +1504,6 @@ tree_table_query_creator(){
 										tree_depth, n_y_labels, num_nodes);
 
 		now_data_addr = addr_auto_padder(toast_now_item_id, now_data_addr, toast_item_rawdata, num_nodes, 4);
-		//printf("addr offset: %x\n", (char *)now_data_addr - (char *)tree_data_page);
 		int* feature_indices = (int *) malloc(sizeof(int) * num_nodes);
 		for (int feature_indices_i = 0 ; feature_indices_i < num_nodes ; feature_indices_i++){
 			feature_indices[feature_indices_i] = *((int *)(now_data_addr));
@@ -1581,7 +1527,6 @@ tree_table_query_creator(){
 		int_debug_print(feature_indices, num_nodes, 0);
 
 		now_data_addr = addr_auto_padder(toast_now_item_id, now_data_addr, toast_item_rawdata, num_nodes, 8);
-		//printf("addr offset: %x\n", (char *)now_data_addr - (char *)tree_data_page);
 		float* feature_thresholds = (float *) malloc(sizeof(float) * num_nodes);
 		for (int feature_thresholds_i = 0 ; feature_thresholds_i < num_nodes ; feature_thresholds_i++){
 			feature_thresholds[feature_thresholds_i] = (float) *((double *)(now_data_addr));
@@ -1605,7 +1550,6 @@ tree_table_query_creator(){
 		float_debug_print(feature_thresholds, num_nodes, 0);
 
 		now_data_addr = addr_auto_padder(toast_now_item_id, now_data_addr, toast_item_rawdata, num_nodes, 4);
-		//printf("addr offset: %x\n", (char *)now_data_addr - (char *)tree_data_page);
 		for (int is_categorical_i = 0 ; is_categorical_i < num_nodes ; is_categorical_i++){
 			if (!carefully_incl_addr(toast_now_item_id, toast_item_rawdata, now_data_addr, 4)){
 				// item change
@@ -1626,7 +1570,6 @@ tree_table_query_creator(){
 		printf("is_categorical\n");
 
 		now_data_addr = addr_auto_padder(toast_now_item_id, now_data_addr, toast_item_rawdata, num_nodes * 2, 8);
-		//printf("addr offset: %x\n", (char *)now_data_addr - (char *)tree_data_page);
 		for (int nonnull_split_count_i = 0 ; nonnull_split_count_i < (num_nodes * 2) ; nonnull_split_count_i++){
 			if (!carefully_incl_addr(toast_now_item_id, toast_item_rawdata, now_data_addr, 8)){
 				// item change
@@ -1647,7 +1590,6 @@ tree_table_query_creator(){
 		printf("nonnull_split_count\n");
 
 		now_data_addr = addr_auto_padder(toast_now_item_id, now_data_addr, toast_item_rawdata, num_nodes * 3, 8);
-		//printf("addr offset: %x\n", (char *)now_data_addr - (char *)tree_data_page);
 		float** predictions = (float **) malloc(sizeof(float *) * 3);
 		for (int malloc_i = 0 ; malloc_i < 3 ; malloc_i++){
 			predictions[malloc_i] = (float *) malloc(sizeof(float) * num_nodes);
@@ -1665,7 +1607,6 @@ tree_table_query_creator(){
 						now_data_addr = toast_item_rawdata + SizeofHeapTupleHeader + 13;
 						now_data_addr = addr_auto_padder(toast_now_item_id, now_data_addr, toast_item_rawdata, (num_nodes * (3 - predictions_line)) - predictions_i - 1, 8);
 					} else{
-						//printf("tree_data_extractor - item number error in toast page, want %d but max %d\n", toast_now_item_offset + 1, tree_data_item_num);
 						printf("end of page\n");
 					}
 				} else{
@@ -1674,20 +1615,11 @@ tree_table_query_creator(){
 			}
 		}
 		
-		printf("predictions\n");
-		for (int pline = 0 ; pline < 3 ; pline++){
-			printf("line %d\n", pline);
-			float_debug_print(predictions[pline], num_nodes, 0);
-		}
-
 		// make query
-		printf("make query for new table\n");
-
 		// make query for drop table
 		char *drop_query = (char *) malloc(sizeof(char) * 40);
 		char *drop_query_front = "DROP TABLE IF EXISTS higgs_1k_for_hw;";
 		strcpy(drop_query, drop_query_front);
-		//printf("drop_query: %s\n", drop_query);
 
 		// make query for create table
 		char *create_query = (char *) malloc(sizeof(char) * (50 + num_datas * (num_nodes * 15)));
@@ -1732,7 +1664,6 @@ tree_table_query_creator(){
 		free(create_col_num_tmp);
 
 		strcat(create_query, create_query_end);
-		//printf("create_query: %s\n", create_query);
 
 		// make query for save data to table
 		char *save_query = malloc(sizeof(char) * (40 + 7 * (num_nodes * 15)));
@@ -1780,7 +1711,6 @@ tree_table_query_creator(){
 		free(save_num_tmp);
 
 		strcat(save_query, save_query_end);	
-		//printf("%s\n", save_query);
 
 		char* total_query = (char *) malloc(sizeof(char) * (strlen(drop_query) + strlen(create_query) + strlen(save_query) + 5));
 		strcpy(total_query, drop_query);
@@ -1804,8 +1734,6 @@ tree_table_query_creator(){
 static double
 get_data_num(Oid table_oid, int table_size, double *page_num){
 	
-	printf("-- get_data_num -- OID = %d\n", table_oid);
-
 	Relation table_rel;
 	if (!(table_rel = try_relation_open(table_oid, AccessShareLock))){
 		printf("get_data_num - Oid error occured\n");
@@ -1834,20 +1762,17 @@ get_data_num(Oid table_oid, int table_size, double *page_num){
                 ereport(ERROR, (errcode_for_file_access(), errmsg("could not stat file \"%s\": %m", pathname)));
 			}
         }
-		printf("stat_check: %ld (%d)\n", fst.st_size, segcount);
         totalsize += fst.st_size;
     }
 	double total_page_num = totalsize/0x2000;
 	*page_num = total_page_num;
 	double total_data_num = 0;
 	double first_page_size = PageGetMaxOffsetNumber(get_page_from_raw(get_raw_from_rel(table_rel)));
-	printf("model page data (first page): %f\n", first_page_size);
 
 	if (total_page_num == 1){
 		total_data_num = first_page_size;
 	} else{
 		double last_page_size = PageGetMaxOffsetNumber(get_page_from_raw(get_raw_from_rel_with_bias(table_rel, (total_page_num - 1))));
-		printf("model page data (last page): %f\n", last_page_size);
 		total_data_num = first_page_size * (total_page_num - 1) + last_page_size;
 	}
 
@@ -2250,11 +2175,9 @@ sw_stack_for_hw(const char* query_string, List* querytrees){
 	// extra check for train phase (tree)
 	for (int i = 0 ; i < word_size ; i++){
 		if (hw_strcmp(word_array[i], (char*)"madlib.tree_train")){
-			//printf("train found -> setting flag\n");
 			train_flag = true;
 			tree_table_name = (char *)malloc(sizeof(char) * 100);
 			strcpy(tree_table_name, word_array[3]);
-			//printf("trage table = %s\n", tree_table_name);
 		}
 	}
 
@@ -2272,7 +2195,7 @@ sw_stack_for_hw(const char* query_string, List* querytrees){
 
 	// hw support operation
 	if (op_info.hw_support){
-		printf("hw supported\n");
+		//printf("hw supported\n");
 		op_info.hw_query_num = get_query_num(op_info);
 		query_num_recorded = true;
 		query_num = op_info.hw_query_num;
@@ -2287,7 +2210,6 @@ sw_stack_for_hw(const char* query_string, List* querytrees){
 		foreach(data_model_parsetree_item, data_model_parsetree_list) {
 			RawStmt* parsetree_modified = lfirst_node(RawStmt, data_model_parsetree_item);
 			data_model_querytree_list = pg_analyze_and_rewrite(parsetree_modified, data_model_query, NULL, 0, NULL);
-			//printf("-----------------------------------please1... %d\n", ((FetchStmt *)parsetree_modified->stmt)->howMany);
 		}
 		free(data_model_query);
 		
@@ -2325,18 +2247,7 @@ sw_stack_for_hw(const char* query_string, List* querytrees){
 		
 		// get additional information for specific cases
 		if ((op_info.hw_operation == LINREGR) | (op_info.hw_operation == LOGREGR)){
-
-			//int model_col_num;
-			//for (int now_model_num = 0 ; now_model_num < rtable_colnum[1] ; now_model_num++){
-			//	if (hw_strcmp(op_info.model_col_name, rtable_colname[1][now_model_num])){
-			//		model_col_num = now_model_num;
-			//		break;
-			//	}
-			//}
-			//printf("model col num: %d\n", model_col_num);
-
     		uint32_t mask_base = 0 | 1;
-
 			int* model_col_num = (int *)malloc(sizeof(int) * op_info.model_col_len);
 			uint32_t model_col_num_bit = 0;
 			for (int model_num = 0 ; model_num < op_info.model_col_len ; model_num++){
@@ -2462,11 +2373,10 @@ sw_stack_for_hw(const char* query_string, List* querytrees){
 			double new_data_num = row_num * attribute;
 			
 			double new_exec_time_predict = 0;
-			//double new_data_cost = new_data_num / 1000;
 			// cost = page_num + 1 + row * 0.011 + row * attribute * 0.001
 			double new_data_cost = page_num + 1 + row_num * 0.011 + new_data_num * 0.001;
 
-			printf("Extracted data num: %f (%f * %d) / page num: %f -> cost = %f\n", new_data_num, row_num, attribute, page_num, new_data_cost);
+			//printf("Extracted data num: %f (%f * %d) / page num: %f -> cost = %f\n", new_data_num, row_num, attribute, page_num, new_data_cost);
 
 			num_rows_recorded = true;
 			num_rows = new_data_cost;
@@ -2531,8 +2441,9 @@ sw_stack_for_hw(const char* query_string, List* querytrees){
 	}
 }
 
+//////////////////////////////////////////////////////////////////
 // adaptive range functionality
-
+//////////////////////////////////////////////////////////////////
 
 int polyfit(int pointCount, double *xValues, double *yValues, int coefficientCount, double *coefficientResults){
 
@@ -2741,24 +2652,10 @@ void print_data(double* data, int data_len){
 
 int get_avg_error(double* data_num, double* exec_time, int data_len, double* error, double* error_rate, double* exec_coef, bool first_flag){
 
-    //printf("get_avg_error\n");
-    //print_data(data_num, data_len);
-    //print_data(exec_time, data_len);
     if (polyfit(data_len, data_num, exec_time, EXEC_ORDER + 1, exec_coef)){
         printf("Error occured in polyfit\n");
     }
-    /*
-    for (int i = 0 ; i <= EXEC_ORDER ; i++){
-        printf("%e\n", exec_coef[i]);
-    }
-    */
     double *assume_result = polyval_multi(data_num, exec_time, data_len, exec_coef);
-    /*
-    for (int i = 0 ; i < data_len ; i++){
-        printf("%lf ", assume_result[i]);
-    }
-    printf("\n");
-    */
     double partial_error = 0;
     double total_error = 0;
     double total_error_rate = 0;
@@ -2770,8 +2667,6 @@ int get_avg_error(double* data_num, double* exec_time, int data_len, double* err
         if ((!first_flag) & (j == 0)){
             continue;
         }
-        //printf("partial error: %f\n", partial_error);
-        //printf("partial error rate: %f\n", ((partial_error / exec_time[j]) * 100));
         total_error += partial_error;
         total_error_rate += ((partial_error / exec_time[j]) * 100);
     }
@@ -2783,7 +2678,6 @@ int get_avg_error(double* data_num, double* exec_time, int data_len, double* err
         *error_rate = total_error_rate / (data_len - 1);        
     }
 
-    //printf("error: %lf, error_rate: %lf\n", *error, *error_rate);
     free(assume_result);
     
     return 0;
@@ -2792,11 +2686,7 @@ int get_avg_error(double* data_num, double* exec_time, int data_len, double* err
 int adjust_range(double* data_num1, double* data_num2, double* exec_time1, double* exec_time2, int* data1_len, int* data2_len,
                  double** min_left_data_num, double** min_right_data_num, 
                  double** min_left_exec_time, double** min_right_exec_time, 
-                 double** min_left_coef, double** min_right_coef, bool first_flag){
-    
-    //printf("adjust_range\n");
-    //print_data(data_num1, *data1_len);
-    //print_data(exec_time1, *data1_len);
+                 double** min_left_coef, double** min_right_coef, bool first_flag){   
 
     int def_data1_len = *data1_len;
     int def_data2_len = *data2_len;
@@ -2815,23 +2705,16 @@ int adjust_range(double* data_num1, double* data_num2, double* exec_time1, doubl
     if (get_avg_error(data_num1, exec_time1, def_data1_len, &def_left_error, &def_left_error_rate, def_left_coef, first_flag)){
         printf("Error occured in get_avg_error\n");
     }
-    //printf("[left] error: %lf, error_rate: %lf\n", def_left_error, def_left_error_rate);
+
     if (get_avg_error(data_num2, exec_time2, def_data2_len, &def_right_error, &def_right_error_rate, def_right_coef, false)){
         printf("Error occured in get_avg_error\n");
     }
-    //printf("[right] error: %lf, error_rate: %lf\n", def_right_error, def_right_error_rate);
-    //printf("[left] error_rate: %lf [right] error_rate: %lf\n", def_left_error_rate, def_right_error_rate);
-
-    //print_data(data_num1, def_data1_len);
-    //print_data(data_num2, def_data2_len);
 
     double left_error;
     double left_error_rate;
     double right_error;
     double right_error_rate;
 
-    // phase 1 (left moving phase)
-    //printf("Phase 1\n");
     double min_left_error_1 = def_left_error;
     double min_right_error_1 = def_right_error;
     double min_left_error_rate_1 = def_left_error_rate;
@@ -2876,9 +2759,6 @@ int adjust_range(double* data_num1, double* data_num2, double* exec_time1, doubl
         min_right_exec_time_1[(right_len_1 - 1)] = 0;
         right_len_1 -= 1;
 
-        //print_data(min_left_data_num_1, left_len_1);
-        //print_data(min_right_data_num_1, right_len_1);
-
         double *left_coef_1 = (double *)malloc(sizeof(double) * (EXEC_ORDER + 1));
         if (get_avg_error(min_left_data_num_1, min_left_exec_time_1, left_len_1, &left_error, &left_error_rate, left_coef_1, first_flag)){
             printf("Error occured in get_avg_error\n");
@@ -2887,11 +2767,8 @@ int adjust_range(double* data_num1, double* data_num2, double* exec_time1, doubl
         if (get_avg_error(min_right_data_num_1, min_right_exec_time_1, right_len_1, &right_error, &right_error_rate, right_coef_1, false)){
             printf("Error occured in get_avg_error\n");
         }     
-        //printf("[left] error_rate: %lf [right] error_rate: %lf\n", left_error_rate, right_error_rate);
 
         if ((left_error_rate < min_left_error_rate_1) & (right_error_rate < min_right_error_rate_1)){
-            //printf("case 1\n");
-            //printf("updated to %lf, %lf\n", left_error_rate, right_error_rate);
             min_left_error_1 = left_error;
             min_right_error_1 = right_error;
             min_left_error_rate_1 = left_error_rate;
@@ -2903,8 +2780,6 @@ int adjust_range(double* data_num1, double* data_num2, double* exec_time1, doubl
             min_left_len_1 = left_len_1;
             min_right_len_1 = right_len_1;
         } else if ((left_error_rate > min_left_error_rate_1) & (right_error_rate > min_right_error_rate_1)){
-            //printf("case 2\n");
-            //printf("break\n");
             // Roll back 
             for (int right_delete = right_len_1 ; right_delete >= 1 ; right_delete--){
                 min_right_data_num_1[right_delete] = min_right_data_num_1[right_delete - 1];
@@ -2921,11 +2796,9 @@ int adjust_range(double* data_num1, double* data_num2, double* exec_time1, doubl
             break;
         } else{
             if ((left_error_rate < min_left_error_rate_1) & (right_error_rate > min_right_error_rate_1)){
-                //printf("case 3_1\n");
                 double left_improved = min_left_error_rate_1 - left_error_rate;
                 double right_worsed = right_error_rate - min_right_error_rate_1;
                 if (left_improved > right_worsed){
-                    //printf("updated to %lf, %lf\n", left_error_rate, right_error_rate);
                     min_left_error_1 = left_error;
                     min_right_error_1 = right_error;
                     min_left_error_rate_1 = left_error_rate;
@@ -2937,7 +2810,6 @@ int adjust_range(double* data_num1, double* data_num2, double* exec_time1, doubl
                     min_left_len_1 = left_len_1;
                     min_right_len_1 = right_len_1;
                 } else{
-                    //printf("break\n");
                     // Roll back 
                     for (int right_delete = right_len_1 ; right_delete >= 1 ; right_delete--){
                         min_right_data_num_1[right_delete] = min_right_data_num_1[right_delete - 1];
@@ -2954,11 +2826,9 @@ int adjust_range(double* data_num1, double* data_num2, double* exec_time1, doubl
                     break;
                 }
             } else{
-                //printf("case 3_2\n");
                 double left_worsed = left_error_rate - min_left_error_rate_1;
                 double right_improved = min_right_error_rate_1 - right_error_rate;
                 if (right_improved > left_worsed){
-                    //printf("updated to %lf, %lf\n", left_error_rate, right_error_rate);
                     min_left_error_1 = left_error;
                     min_right_error_1 = right_error;
                     min_left_error_rate_1 = left_error_rate;
@@ -2970,7 +2840,6 @@ int adjust_range(double* data_num1, double* data_num2, double* exec_time1, doubl
                     min_left_len_1 = left_len_1;
                     min_right_len_1 = right_len_1;
                 } else{
-                    //printf("break\n");
                     // Roll back 
                     for (int right_delete = right_len_1 ; right_delete >= 1 ; right_delete--){
                         min_right_data_num_1[right_delete] = min_right_data_num_1[right_delete - 1];
@@ -2989,25 +2858,12 @@ int adjust_range(double* data_num1, double* data_num2, double* exec_time1, doubl
             }
         }   
         if ((min_left_error_rate_1 < 3) | (min_right_error_rate_1 < 3)){
-            //printf("small enough - break\n");
             // Roll back 
-            /*
-            for (int right_delete = right_len_1 ; right_delete >= 1 ; right_delete--){
-                min_right_data_num_1[right_delete] = min_right_data_num_1[right_delete - 1];
-                min_right_exec_time_1[right_delete] = min_right_exec_time_1[right_delete - 1];
-            }
-            min_right_data_num_1[0] = min_left_data_num_1[(left_len_1 - 2)];
-            min_right_exec_time_1[0] = min_left_exec_time_1[(left_len_1 - 2)];
-            right_len_1 += 1;
-            min_left_data_num_1[(left_len_1 - 1)] = 0;
-            min_left_exec_time_1[(left_len_1 - 1)] = 0;
-            left_len_1 -= 1;*/
             free(left_coef_1);
             free(right_coef_1);
             break;
         }
         if ((min_left_len_1 < 4) | (min_right_len_1 < 4)){
-            //printf("too small data for range - break\n");
             // Roll back 
             for (int right_delete = right_len_1 ; right_delete >= 1 ; right_delete--){
                 min_right_data_num_1[right_delete] = min_right_data_num_1[right_delete - 1];
@@ -3024,22 +2880,7 @@ int adjust_range(double* data_num1, double* data_num2, double* exec_time1, doubl
             break;
         }
     }
-    //printf("phase 1 result: %lf, %lf / boundary: %lf\n", min_left_error_rate_1, min_right_error_rate_1, min_right_data_num_1[0]);
-    /*
-    for (int x = 0 ; x < EXEC_ORDER + 1 ; x++){
-        printf("%e ", min_left_coef_1[x]);
-    }
-    printf("\n");
-    for (int y = 0 ; y < EXEC_ORDER + 1 ; y++){
-        printf("%e ", min_right_coef_1[y]);
-    }
-    printf("\n");
-    */
-    //print_data(min_left_data_num_1, min_left_len_1);
-    //print_data(min_right_data_num_1, min_right_len_1);
 
-    // phase 1 (right moving phase)
-    //printf("Phase 2\n");
     double min_left_error_2 = def_left_error;
     double min_right_error_2 = def_right_error;
     double min_left_error_rate_2 = def_left_error_rate;
@@ -3085,9 +2926,6 @@ int adjust_range(double* data_num1, double* data_num2, double* exec_time1, doubl
         min_left_exec_time_2[(left_len_2 - 1)] = 0;
         left_len_2 -= 1;
 
-        //print_data(min_left_data_num_2, left_len_2);
-        //print_data(min_right_data_num_2, right_len_2);
-
         double *left_coef_2 = (double *)malloc(sizeof(double) * (EXEC_ORDER + 1));
         if (get_avg_error(min_left_data_num_2, min_left_exec_time_2, left_len_2, &left_error, &left_error_rate, left_coef_2, first_flag)){
             printf("Error occured in get_avg_error\n");
@@ -3096,11 +2934,8 @@ int adjust_range(double* data_num1, double* data_num2, double* exec_time1, doubl
         if (get_avg_error(min_right_data_num_2, min_right_exec_time_2, right_len_2, &right_error, &right_error_rate, right_coef_2, false)){
             printf("Error occured in get_avg_error\n");
         }     
-        //printf("[left] error_rate: %lf [right] error_rate: %lf\n", left_error_rate, right_error_rate);
 
         if ((left_error_rate < min_left_error_rate_2) & (right_error_rate < min_right_error_rate_2)){
-            //printf("case 1\n");
-            //printf("updated to %lf, %lf\n", left_error_rate, right_error_rate);
             min_left_error_2 = left_error;
             min_right_error_2 = right_error;
             min_left_error_rate_2 = left_error_rate;
@@ -3112,8 +2947,6 @@ int adjust_range(double* data_num1, double* data_num2, double* exec_time1, doubl
             min_left_len_2 = left_len_2;
             min_right_len_2 = right_len_2;
         } else if ((left_error_rate > min_left_error_rate_2) & (right_error_rate > min_right_error_rate_2)){
-            //printf("case 2\n");
-            //printf("break\n");
             // Roll back 
             min_left_data_num_2[left_len_2] = min_right_data_num_2[1];
             min_left_exec_time_2[left_len_2] = min_right_exec_time_2[1];
@@ -3130,11 +2963,9 @@ int adjust_range(double* data_num1, double* data_num2, double* exec_time1, doubl
             break;
         } else{
             if ((left_error_rate < min_left_error_rate_2) & (right_error_rate > min_right_error_rate_2)){
-                //printf("case 3_1\n");
                 double left_improved = min_left_error_rate_2 - left_error_rate;
                 double right_worsed = right_error_rate - min_right_error_rate_2;
                 if (left_improved > right_worsed){
-                    //printf("updated to %lf, %lf\n", left_error_rate, right_error_rate);
                     min_left_error_2 = left_error;
                     min_right_error_2 = right_error;
                     min_left_error_rate_2 = left_error_rate;
@@ -3146,7 +2977,6 @@ int adjust_range(double* data_num1, double* data_num2, double* exec_time1, doubl
                     min_left_len_2 = left_len_2;
                     min_right_len_2 = right_len_2;
                 } else{
-                    //printf("break\n");
                     // Roll back 
                     min_left_data_num_2[left_len_2] = min_right_data_num_2[1];
                     min_left_exec_time_2[left_len_2] = min_right_exec_time_2[1];
@@ -3163,11 +2993,9 @@ int adjust_range(double* data_num1, double* data_num2, double* exec_time1, doubl
                     break;
                 }
             } else{
-                //printf("case 3_2\n");
                 double left_worsed = left_error_rate - min_left_error_rate_2;
                 double right_improved = min_right_error_rate_2 - right_error_rate;
                 if (right_improved > left_worsed){
-                    //printf("updated to %lf, %lf\n", left_error_rate, right_error_rate);
                     min_left_error_2 = left_error;
                     min_right_error_2 = right_error;
                     min_left_error_rate_2 = left_error_rate;
@@ -3179,7 +3007,6 @@ int adjust_range(double* data_num1, double* data_num2, double* exec_time1, doubl
                     min_left_len_2 = left_len_2;
                     min_right_len_2 = right_len_2;
                 } else{
-                    //printf("break\n");
                     // Roll back 
                     min_left_data_num_2[left_len_2] = min_right_data_num_2[1];
                     min_left_exec_time_2[left_len_2] = min_right_exec_time_2[1];
@@ -3198,25 +3025,12 @@ int adjust_range(double* data_num1, double* data_num2, double* exec_time1, doubl
             }
         }   
         if ((min_left_error_rate_1 < 3) | (min_right_error_rate_1 < 3)){
-            //printf("small enough - break\n");
             // Roll back 
-            /*
-            min_left_data_num_2[left_len_2] = min_right_data_num_2[1];
-            min_left_exec_time_2[left_len_2] = min_right_exec_time_2[1];
-            left_len_2 += 1;
-            for (int right_delete = 0 ; right_delete < (right_len_2 - 1) ; right_delete++){
-                min_right_data_num_2[right_delete] = min_right_data_num_2[right_delete + 1];
-                min_right_exec_time_2[right_delete] = min_right_exec_time_2[right_delete + 1];
-            }
-            min_right_data_num_2[(right_len_2 - 1)] = 0;
-            min_right_exec_time_2[(right_len_2 - 1)] = 0;
-            right_len_2 -= 1;*/
             free(left_coef_2);
             free(right_coef_2);
             break;
         }
         if ((min_left_len_1 < 4) | (min_right_len_1 < 4)){
-            //printf("too small data for range - break\n");
             // Roll back 
             min_left_data_num_2[left_len_2] = min_right_data_num_2[1];
             min_left_exec_time_2[left_len_2] = min_right_exec_time_2[1];
@@ -3233,48 +3047,15 @@ int adjust_range(double* data_num1, double* data_num2, double* exec_time1, doubl
             break;
         }
     }
-    //printf("phase 2 result: %lf, %lf / boundary: %lf\n", min_left_error_rate_2, min_right_error_rate_2, min_right_data_num_2[0]);
-    /*
-    for (int x = 0 ; x < EXEC_ORDER + 1 ; x++){
-        printf("%e ", min_left_coef_2[x]);
-    }
-    printf("\n");
-    for (int y = 0 ; y < EXEC_ORDER + 1 ; y++){
-        printf("%e ", min_right_coef_2[y]);
-    }
-    printf("\n");
-    */
-    //print_data(min_left_data_num_2, min_left_len_2);
-    //print_data(min_right_data_num_2, min_right_len_2);
-
-    //print_data(min_left_data_num_1, min_left_len_1);
-    //print_data(min_right_data_num_1, min_right_len_1);
 
     if (min_left_error_rate_1 + min_right_error_rate_1 < min_left_error_rate_2 + min_right_error_rate_2){
-        printf("Final result(Phase1): %lf, %lf / boundary: %lf\n", min_left_error_rate_1, min_right_error_rate_1, min_right_data_num_1[0]);
-        //print_data(min_left_data_num_1, min_left_len_1);
-        //printf("\n");
-        //print_data(min_right_data_num_1, min_right_len_1);
-        //printf("\n");
-        /*
-        for (int x = 0 ; x < EXEC_ORDER + 1 ; x++){
-            printf("%e ", min_left_coef_1[x]);
-        }
-        printf("\n");
-        for (int y = 0 ; y < EXEC_ORDER + 1 ; y++){
-            printf("%e ", min_right_coef_1[y]);
-        }
-        printf("\n");
-        */
+        //printf("Final result(Phase1): %lf, %lf / boundary: %lf\n", min_left_error_rate_1, min_right_error_rate_1, min_right_data_num_1[0]);
         *min_left_data_num = min_left_data_num_1;
         *min_right_data_num = min_right_data_num_1;
         *min_left_exec_time = min_left_exec_time_1;
         *min_right_exec_time = min_right_exec_time_1;
-
         *min_left_coef = min_left_coef_1;
         *min_right_coef = min_right_coef_1;
-
-
         *data1_len = min_left_len_1;
         *data2_len = min_right_len_1;
         free(min_left_data_num_2);
@@ -3284,30 +3065,13 @@ int adjust_range(double* data_num1, double* data_num2, double* exec_time1, doubl
         free(min_left_coef_2);
         free(min_right_coef_2);
     } else{
-        printf("Final result(Phase2): %lf, %lf / boundary: %lf\n", min_left_error_rate_2, min_right_error_rate_2, min_right_data_num_2[0]);
-        //print_data(min_left_data_num_2, min_left_len_2);
-        //printf("\n");
-        //print_data(min_right_data_num_2, min_right_len_2);
-        //printf("\n");
-        /*
-        for (int x = 0 ; x < EXEC_ORDER + 1 ; x++){
-            printf("%e ", min_left_coef_2[x]);
-        }
-        printf("\n");
-        for (int y = 0 ; y < EXEC_ORDER + 1 ; y++){
-            printf("%e ", min_right_coef_2[y]);
-        }
-        printf("\n");
-        */
+        //printf("Final result(Phase2): %lf, %lf / boundary: %lf\n", min_left_error_rate_2, min_right_error_rate_2, min_right_data_num_2[0]);
         *min_left_data_num = min_left_data_num_2;
         *min_right_data_num = min_right_data_num_2;
         *min_left_exec_time = min_left_exec_time_2;
         *min_right_exec_time = min_right_exec_time_2;
-
         *min_left_coef = min_left_coef_2;
         *min_right_coef = min_right_coef_2;
-
-
         *data1_len = min_left_len_2;
         *data2_len = min_right_len_2;
         free(min_left_data_num_1);
@@ -4644,23 +4408,8 @@ exec_simple_query(const char *query_string)
 	 * we are in aborted transaction state!)
 	 */
 	//Debug_print_parse = true;
-	printf("pg_parse_query (exec_simple_query)\n");	
 	parsetree_list = pg_parse_query(query_string);
 	
-	printf("(parsetree_list debug)\n");
-	/*ListCell *pt_item;
-	int numcnt = 0;
-	foreach(pt_item, parsetree_list){
-		printf("-- item %d\n", numcnt++);
-		RawStmt *debugparsetree = lfirst_node(RawStmt, pt_item);
-		printf("type: %d\n", debugparsetree->type);
-		//NodeTag test = T_RawStmt;
-		//printf("check num %d\n", test);
-		printf("location: %d\n", debugparsetree->stmt_location); 
-		printf("len: %d\n", debugparsetree->stmt_len);
-	}
-	printf("--- \n");*/
-
 	/* Log immediately if dictated by log_statement */
 	if (check_log_statement(parsetree_list))
 	{
@@ -4768,29 +4517,17 @@ exec_simple_query(const char *query_string)
 		querytree_list = pg_analyze_and_rewrite(parsetree, query_string,
 												NULL, 0, NULL);
 
-		//ListCell *querytree_cell;
-		//numcnt = 0;
-		printf("(querytree_list debug)\n");
-		/*foreach(querytree_cell, querytree_list){
-			Query *tquery = lfirst_node(Query, querytree_cell);
-			printf("-- item %d\n", numcnt++);
-			printf("type: %d\n", tquery->type);
-			printf("location: %d\n", tquery->stmt_location); 
-			printf("len: %d\n", tquery->stmt_len);
-		}
-		printf("--- \n");*/
-
 		// --------------------------------------------------------------------------
-		//
-		//	Something should be implemented 
+		//	HW STACK NEEDED
 		//	(HW checker / HW reconstructor / Predictor / HW compiler)
-		//
 		// --------------------------------------------------------------------------
-		if (HW_ACTIVATED)
+		if (HW_ACTIVATED){
 			sw_stack_for_hw(query_string, querytree_list);
-			if (HW_BREAK_EXEC){
+			if (!cpu_used){
+				printf("HW connection should be implemented\n");
 				return;
 			}
+		}
 		
 		plantree_list = pg_plan_queries(querytree_list,
 										CURSOR_OPT_PARALLEL_OK, NULL);
@@ -8024,7 +7761,7 @@ PostgresMain(int argc, char *argv[],
 
 		start_time_recorded = true;
 		query_start_time = clock();
-		printf("start time: %lf\n", (double)query_start_time);
+		//printf("start time: %lf\n", (double)query_start_time);
 
 		/*
 		 * (4) turn off the idle-in-transaction timeout, if active.  We do
@@ -8078,8 +7815,8 @@ PostgresMain(int argc, char *argv[],
 					query_string = pq_getmsgstring(&input_message);
 					pq_getmsgend(&input_message);
 
-					printf("exec_simple_query (PostgresMain)\n");
-					printf("query: %s\n", query_string);
+					//printf("exec_simple_query (PostgresMain)\n");
+					//printf("query: %s\n", query_string);
 
 					if (am_walsender)
 					{
