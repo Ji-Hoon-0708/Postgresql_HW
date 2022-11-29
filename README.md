@@ -6,7 +6,7 @@ The ability to perform machine learning (ML) tasks in a database management syst
 
 ---
 ## Postgres+
-### This directory contains the Trinity's software stack, Postgres+.
+### This directory contains the Trinity's software stack, Postgres+
 - PostgreSQL+ is hardware-aware software stack for Trinity system based on open source Postgres. 
 - PostgreSQL+ modifies the PostgreSQL’s internal subsystems such as query analyzer, optimizer, and executor to enable the use of SmartSSD backend within the DBMS.
 - Postgres always uses the CPU to process queries, but Postgres+ uses a cost model to decide whether to process queries through CPU or offload to SmartSSD hardware. 
