@@ -6,6 +6,7 @@
  * Portions Copyright (c) 1996-2019, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
+ * Modified for Trinity Functionalities
  *
  * IDENTIFICATION
  *	  src/backend/tcop/postgres.c
@@ -223,62 +224,66 @@ static bool train_flag = false;
 static char *tree_table_name;
 
 /*--------------------------------------------------------
- * Code for sw_stack_for_hw in this file
+ * Parameters for Trinity SW Stack
  *------------------------------------------------------*/
 
-#define HW_ACTIVATED 	    1
-
 /*--------------------------------------------------------
- * Variable for HW-aware SW stack
+ * Trinity functionality usage flag
  *------------------------------------------------------*/
 
-#define NONE				0
-#define MAX_OP_NUM			2
-#define MAX_NAME_LEN		30
+#define HW_ACTIVATED					1
 
 /*--------------------------------------------------------
- *	#define for HW support check query cluster
+ * Parameters for HW-aware SW stack
  *------------------------------------------------------*/
 
-#define SELECT				1	
-#define FROM				2	
-#define WHERE				3	
-#define GROUP_BY			4
-#define ORDER_BY			5
-#define AS					6
+#define NONE							0
+#define MAX_OP_NUM						2
+#define MAX_NAME_LEN					30
 
 /*--------------------------------------------------------
- *	#define HW operation
+ * Definitions for HW support check query cluster
  *------------------------------------------------------*/
 
-#define LINREGR				1
-#define LOGREGR				2
-#define SVM					3
-#define MLP					4
-#define TREE				5
-#define FOREST				6
+#define SELECT							1	
+#define FROM							2	
+#define WHERE							3	
+#define GROUP_BY						4
+#define ORDER_BY						5
+#define AS								6
 
 /*--------------------------------------------------------
- *	#define aggregation operation
- *------------------------------------------------------*/
-#define COUNT				1
-#define MAX					2
-#define MIN					3
-#define AVG					4
-#define SUM					5
-
-/*--------------------------------------------------------
- *	#define filtering operation
+ * Definitions for HW ML operation
  *------------------------------------------------------*/
 
-#define LARGER				1
-#define LARGERSAME			2
-#define SAME				3
-#define SMALLER				4
-#define SMALLERSAME			5
+#define LINREGR							1
+#define LOGREGR							2
+#define SVM								3
+#define MLP								4
+#define TREE							5
+#define FOREST							6
 
 /*--------------------------------------------------------
- *	#define query species
+ * Definitions for HW aggregation operation
+ *------------------------------------------------------*/
+#define COUNT							1
+#define MAX								2
+#define MIN								3
+#define AVG								4
+#define SUM								5
+
+/*--------------------------------------------------------
+ * Definitions for HW filtering operation
+ *------------------------------------------------------*/
+
+#define LARGER							1
+#define LARGERSAME						2
+#define SAME							3
+#define SMALLER							4
+#define SMALLERSAME						5
+
+/*--------------------------------------------------------
+ * Definitions for query species
  *------------------------------------------------------*/
 
 #define	Q1								0
@@ -294,7 +299,7 @@ static char *tree_table_name;
 #define Q11								10
 
 /*--------------------------------------------------------
- *	#define datasets
+ *	Definitions for dataset type
  *------------------------------------------------------*/
 
 #define HIGGS							1	// > 17
@@ -302,15 +307,13 @@ static char *tree_table_name;
 #define WILT							4	// 5-8
 #define HABERMAN						8	// 1-4
 
-//////////////////////////////////////////////////////////////////
-//	Database
-//////////////////////////////////////////////////////////////////
+/*--------------------------------------------------------
+ *	Parameters for Trinity HW cost model
+ *------------------------------------------------------*/
 
 #define PAGE_SIZE						8192
 #define UNIT_DATABASE_SIZE				1073741824
 
-//////////////////////////////////////////////////////////////////
-// NOTE: Configure these params...
 #define USER_TOTAL_LUT					320000			
 #define USER_TOTAL_FF					862374
 #define USER_TOTAL_URAM					120
@@ -326,7 +329,7 @@ static char *tree_table_name;
 
 #define USER_CLOCK						170
 
-// NOTE: Host timing information
+// Host timing information
 #define HOST_ADDRESSMAP_LATENCY			0.44
 #define HOST_SETKERNEL_LATENCY			0.08
 
@@ -336,8 +339,7 @@ static char *tree_table_name;
 #define HOST_CREATEBUF_LATENCY_3		3.095	// 0.001GB
 #define HOST_CREATEBUF_LATENCY_4		2.842	// 0.0001GB
 
-//////////////////////////////////////////////////////////////////
-// NOTE: Rule-based information about FPGA parmeter
+// Rule-based information about FPGA parmeter
 #define SMARTSSD_TOTAL_LUT				522720
 #define SMARTSSD_TOTAL_FF				1045440
 #define SMARTSSD_TOTAL_URAM				128
@@ -350,25 +352,25 @@ static char *tree_table_name;
 #define SMARTSSD_SHELL_BRAM				311
 #define SMARTSSD_SHELL_DSP				9
 
-// NOTE: Variable by core number
+// Variable by core number
 #define SMARTSSD_CORE_VAR_LUT			105998			
 #define SMARTSSD_CORE_VAR_FF			92258
 #define SMARTSSD_CORE_VAR_URAM			32
 #define SMARTSSD_CORE_VAR_BRAM			15
 #define SMARTSSD_CORE_VAR_DSP			342
 
-// NOTE: Constant by core number
+// Constant by core number
 #define SMARTSSD_CORE_CONST_LUT			10708
 #define SMARTSSD_CORE_CONST_FF			9750
 #define SMARTSSD_CORE_CONST_URAM		0
 #define SMARTSSD_CORE_CONST_BRAM		22
 #define SMARTSSD_CORE_CONST_DSP			10
 
-// NOTE: Rule-based information about FPGA DRAM parameter (GB)
+// Rule-based information about FPGA DRAM parameter (GB)
 #define SMARTSSD_DRAM_SIZE				4
 #define SMARTSSD_DRAM_CH				1
 
-// NOTE: Rule-based information about BW parameter (GB/s)
+// Rule-based information about BW parameter (GB/s)
 #define SMARTSSD_SSD2FPGA_BW			4		
 #define SMARTSSD_DRAM2FPGA_BW			19.2
 #define SMARTSSD_FPGA2HOST_BW			4
@@ -391,11 +393,11 @@ static char *tree_table_name;
 #define SMARTSSD_FPGA2HOST_EFFBW_0		934155386.88		// 0.87GB/s, 0.001GB
 #define SMARTSSD_FPGA2HOST_EFFBW_1		311385128.96		// 0.29GB/s, 0.0001GB
 
-// NOTE: Query characteristic
+// Query characteristic
 #define USER_LAYER_NUM					2
 
 /*--------------------------------------------------------
- *	#defines for adaptive range
+ *	Definitions  for adaptive range
  *------------------------------------------------------*/
 
 #define MATRIX_VALUE_PTR(pA, row, col) (&(((pA)->pContents)[(row * (pA)->cols) + col]))
@@ -403,7 +405,7 @@ static char *tree_table_name;
 #define QUERYNUM 11
 #define DATASIZE 50
 #define EXEC_ORDER 3
-# define ADJ_MIN_DATANUM 3
+#define ADJ_MIN_DATANUM 3
 
 // 00: not use anything
 // 10: only simulate once
@@ -454,7 +456,7 @@ static bool num_rows_recorded = false;
 static double num_rows;
 
  /*--------------------------------------------------------
-  *	Structure for HW-aware SW stack
+  *	Structure definition for HW-aware SW stack
   *------------------------------------------------------*/
 
 struct HW_IR {
@@ -523,8 +525,56 @@ struct operation_info{
 };
 
 /*--------------------------------------------------------
- *	Function for HW-aware SW stack
+ *	Functionalities for Trinity HW-aware SW stack
  *------------------------------------------------------*/
+
+//////////////////////////////////////////////////////////////////
+// Memory dump functionality
+//////////////////////////////////////////////////////////////////
+
+static void 
+printchar(unsigned char c){
+	if (isprint(c)){
+ 		printf("%c", c);
+	}
+ 	else{
+ 		printf(".");
+	}
+}
+
+static void 
+dumpmem(unsigned char *buff, int len){
+	int i;
+	for (i = 0 ; i < len ; i++){
+		if (i % 16 == 0){
+			printf("0x%08x ", &buff[i]);
+		}
+		printf("%02x ", buff[i]);
+		if (i % 16 - 15 == 0){
+			int j;
+			printf("" "");
+			for (j = i - 15 ; j <= i ; j++){
+				printchar(buff[j]);
+			}
+			printf("\n");
+		}
+	}
+	if (i % 16 != 0){
+		int j;
+		int spaces = (len - i + 16 - i % 16)*3 + 2;
+		for (j = 0 ; j < spaces ; j++){
+			printf("" ""); 
+		}
+		for(j = i - (i % 16) ; j < len ; j++){
+			printchar(buff[j]);
+		}
+	}
+	printf("\n");
+} 
+
+//////////////////////////////////////////////////////////////////
+// Operation info extracting functionality
+//////////////////////////////////////////////////////////////////
 
 static int
 hw_strcmp(char* str1, char* str2) {
@@ -606,10 +656,6 @@ hw_filterhashmap(char* str) {
 	else
 		return 0;
 }
-
-//////////////////////////////////////////////////////////////////
-// operation info extracting functionality
-//////////////////////////////////////////////////////////////////
 
 static void 
 init_operation_info(struct operation_info *info){
@@ -1013,7 +1059,7 @@ printf_op_info(struct operation_info info){
 }
 
 //////////////////////////////////////////////////////////////////
-// sw stack + tree table query creator functionality
+// Tree table query creator functionality
 //////////////////////////////////////////////////////////////////
 
 static void
@@ -1176,54 +1222,6 @@ hw_str_delete(char* str, char ch) {
 		}
 	}
 }
-
-//////////////////////////////////////////////////////////////////
-// memory dump functionality
-//////////////////////////////////////////////////////////////////
-
-static void 
-printchar(unsigned char c){
-	if (isprint(c)){
- 		printf("%c", c);
-	}
- 	else{
- 		printf(".");
-	}
-}
-
-static void 
-dumpmem(unsigned char *buff, int len){
-	int i;
-	for (i = 0 ; i < len ; i++){
-		if (i % 16 == 0){
-			printf("0x%08x ", &buff[i]);
-		}
-		printf("%02x ", buff[i]);
-		if (i % 16 - 15 == 0){
-			int j;
-			printf("" "");
-			for (j = i - 15 ; j <= i ; j++){
-				printchar(buff[j]);
-			}
-			printf("\n");
-		}
-	}
-	if (i % 16 != 0){
-		int j;
-		int spaces = (len - i + 16 - i % 16)*3 + 2;
-		for (j = 0 ; j < spaces ; j++){
-			printf("" ""); 
-		}
-		for(j = i - (i % 16) ; j < len ; j++){
-			printchar(buff[j]);
-		}
-	}
-	printf("\n");
-} 
-
-//////////////////////////////////////////////////////////////////
-// tree table query creator functionality
-//////////////////////////////////////////////////////////////////
 
 static Page
 get_page_from_raw(bytea *raw_page)
@@ -1781,6 +1779,10 @@ get_data_num(Oid table_oid, int table_size, double *page_num){
 	return total_data_num;
 }
 
+//////////////////////////////////////////////////////////////////
+// HW cost model functionality
+//////////////////////////////////////////////////////////////////
+
 static double 
 get_hw_expectation_time(int user_query_num, int user_dataset, double user_pagenum){
 
@@ -2154,6 +2156,10 @@ get_hw_expectation_time(int user_query_num, int user_dataset, double user_pagenu
 	return user_total_latency;
 }
 
+//////////////////////////////////////////////////////////////////
+// Main functionality of Trinity HW Stack
+//////////////////////////////////////////////////////////////////
+
 static void
 sw_stack_for_hw(const char* query_string, List* querytrees){
 	
@@ -2442,9 +2448,10 @@ sw_stack_for_hw(const char* query_string, List* querytrees){
 }
 
 //////////////////////////////////////////////////////////////////
-// adaptive range functionality
+// Adaptive range functionality
 //////////////////////////////////////////////////////////////////
 
+// Polyfit functionality referenced from "https://github.com/henryfo/polyfit"
 int polyfit(int pointCount, double *xValues, double *yValues, int coefficientCount, double *coefficientResults){
 
     int rVal = 0;
@@ -3085,106 +3092,11 @@ int adjust_range(double* data_num1, double* data_num2, double* exec_time1, doubl
     return 0;
 }
 
+// Data initialization if needed
 void get_init_values(double*** num1, double*** num2, double*** num3, 
                      double*** exec_time1_out, double*** exec_time2_out, double*** exec_time3_out,
                      int** len1, int** len2, int** len3){
 
-    // Default
-    /*  
-    int data1_len_saved = 15;
-    int data2_len_saved = 13;
-    int data3_len_saved = 18;
-
-    double data_num1_saved[] = {1.5, 2.5, 6.5, 14, 15, 25, 30, 50, 65, 130, 140, 280, 300, 500, 1300};
-    double data_num2_saved[] = {1300, 2800, 3000, 5000, 13000, 15000, 25000, 28000, 33000, 55000, 65000, 75000, 125000};
-    double data_num3_saved[] = {125000, 130000, 143000, 150000, 225000, 250000, 308000, 325000, 330000, 375000, 550000, 650000, 700000, 975000, 1400000, 1430000, 2100000, 3080000};
-
-    double q1_exec_time1_saved[] = {5.009, 11.191, 7.748, 16.792, 28.235, 30.145, 38.956, 41.345, 35.973, 52.418, 45.241, 72.999, 209.909, 240.505, 365.524};
-    double q2_exec_time1_saved[] = {9.35, 11.292, 12.841, 13.251, 20.488, 26.042, 27.193, 35.864, 30.417, 46.946, 33.15, 54.163, 139.75, 193.902, 305.527};
-    double q3_exec_time1_saved[] = {7.403, 8.965, 14.224, 15.928, 27.692, 29.636, 38.672, 40.371, 35.787, 56.302, 45.382, 72.221, 220.958, 327.824, 405.367};
-    double q4_exec_time1_saved[] = {17.894, 12.516, 12.863, 13.896, 21.687, 25.323, 28.148, 34.996, 32.996, 48.222, 36.216, 52.933, 144.889, 265.951, 330.051};
-    double q5_exec_time1_saved[] = {12.797, 11.42, 12.91, 15.846, 28.189, 33.896, 43.234, 46.022, 39.047, 55.375, 46.382, 75.878, 277.066, 326.803, 421.25};
-    double q6_exec_time1_saved[] = {10.161, 10.688, 12.009, 13.49, 22.58, 26.02, 33.045, 40.856, 33.935, 52.943, 34.686, 61.955, 174.466, 239.625, 356.558};
-    double q7_exec_time1_saved[] = {12.207, 13.605, 14.461, 16.98, 33.153, 33.544, 46.006, 46.649, 36.199, 59.511, 47.827, 81.501, 284.85, 327.834, 456.841};
-    double q8_exec_time1_saved[] = {5.164, 12.622, 7.569, 13.963, 21.629, 26.906, 33.316, 40.492, 32.828, 54.775, 36.015, 59.572, 187.089, 271.938, 390.979};
-    double q9_exec_time1_saved[] = {81.173, 78.342, 74.583, 76.848, 89.299, 92.651, 110.814, 111.765, 101.522, 124.612, 115.361, 152.165, 439.068, 496.864, 611.651};
-    double q10_exec_time1_saved[] = {76.744, 79.285, 92.126, 96.959, 120.581, 124.703, 175.217, 190.55, 133.223, 190.336, 159.885, 219.694, 1118.38, 1119.738, 1217.085};
-    double q11_exec_time1_saved[] = {82.316, 91.629, 85.542, 86.28, 107.702, 97.484, 116.438, 121.662, 104.085, 122.37, 110.878, 129.364, 589.264, 494.269, 539.124};
-
-    double q1_exec_time2_saved[] = {365.524, 548.974, 1872.263, 2167.093, 3386.87, 9277.869, 10525.969, 5407.051, 23334.794, 25803.333, 16669.776, 48559.641, 56551.836};
-    double q2_exec_time2_saved[] = {305.527, 370.061, 1205.661, 1740.564, 2975.972, 5808.105, 8792.383, 3645.606, 14509.886, 20321.73, 14587.2, 30649.077, 46062.151};
-    double q3_exec_time2_saved[] = {405.367, 584.49, 2012.655, 2377.038, 3581.959, 9893.691, 11531.832, 5800.496, 24134.952, 29738.307, 18191.286, 50551.571, 61687.493};
-    double q4_exec_time2_saved[] = {330.051, 400.493, 1269.822, 1872.095, 3218.198, 6375.026, 9281.487, 3830.26, 15849.221, 21907.723, 15758.756, 31569.845, 48325.145};
-    double q5_exec_time2_saved[] = {421.25, 613.809, 2502.56, 2753.195, 3927.284, 12369.244, 13789.244, 5883.764, 32271.319, 35754.92, 20256.496, 65646.335, 75013.658};
-    double q6_exec_time2_saved[] = {356.558, 418.147, 1590.002, 2217.104, 3533.653, 7760.655, 10956.839, 3964.549, 19916.996, 28217.732, 16989.203, 40260.792, 64115.814};
-    double q7_exec_time2_saved[] = {456.841, 702.726, 2644.18, 3069.341, 4359.867, 13560.691, 14702.675, 6424.821, 33953.631, 35622.5, 21190.27, 69992.293, 79871.8};
-    double q8_exec_time2_saved[] = {390.979, 451.671, 1622.792, 2441.945, 3743.941, 7935.875, 11521.669, 4175.311, 20564.634, 30655.974, 19129.652, 43267.373, 61718.12};
-    double q9_exec_time2_saved[] = {611.651, 901.701, 4004.508, 4245.531, 5701.471, 19549.907, 21006.708, 8435.313, 50805.343, 52559.642, 28104.019, 106375.62, 119138.578};
-    double q10_exec_time2_saved[] = {1217.085, 1486.951, 10760.068, 10558.173, 11383.756, 52222.365, 53091.169, 14007.624, 131299.554, 139747.236, 58041.256, 282640.036, 275979.924};
-    double q11_exec_time2_saved[] = {539.124, 612.425, 4359.527, 4342.357, 4744.796, 20963.225, 21381.717, 5352.497, 48744.342, 55878.196, 25301.286, 113040.877, 116197.875};
-
-    double q1_exec_time3_saved[] = {56551.836, 26713.085, 43052.146, 93323.808, 139332.114, 105511.015, 57944.83, 89096.379, 229580.474, 156243.598, 240975.25, 166006.466, 139562.096, 243597.821, 262546.25, 404717.703, 399187.996, 1205969.281};
-    double q2_exec_time3_saved[] = {46062.151, 17776.235, 33194.21, 58409.181, 87900.828, 84474.642, 39115.23, 76771.871, 144551.863, 128149.336, 195283.74, 150702.284, 92798.449, 210084.337, 180343.384, 346516.425, 265797.913, 800323.03};
-    double q3_exec_time3_saved[] = {61687.493, 28612.6, 45069.838, 98159.046, 148941.095, 111329.742, 62449.838, 90084.871, 230095.489, 169629.422, 257091.821, 180306.385, 149521.546, 266163.218, 288725.023, 433311.225, 430005.474, 1302605.243};
-    double q4_exec_time3_saved[] = {48325.145, 19373.58, 38924.262, 60774.615, 91243.221, 90139.834, 41669.582, 76962.051, 149945.698, 134853.333, 205844.827, 151588.898, 100548.227, 224367.422, 189670.398, 372984.949, 283135.547, 910734.295};
-    double q5_exec_time3_saved[] = {75013.658, 30121.679, 47366.668, 125173.482, 191152.158, 136885.635, 62513.73, 95989.188, 315766.676, 205193.227, 314395.783, 195162.505, 144649.888, 294664.718, 294474.647, 470954.754, 441835.294, 1367070.923};
-    double q6_exec_time3_saved[] = {64115.814, 20089.965, 42560.047, 76699.789, 115235.281, 108547.11, 41905.492, 82042.596, 187861.985, 160100.087, 252727.297, 166929.56, 96630.489, 247056.389, 195290.883, 404462.286, 294431.575, 909565.503};
-    double q7_exec_time3_saved[] = {79871.8, 32490.007, 55270.125, 135122.104, 195579.157, 148150.643, 69447.435, 102812.695, 329552.087, 248551.748, 334101.326, 216450.355, 157916.653, 310184.728, 312772.712, 513220.959, 472904.653, 1389510.781};
-    double q8_exec_time3_saved[] = {61718.12, 21422.176, 45133.391, 80657.687, 119596.658, 118796.035, 46049.951, 89405.264, 197538.799, 192419.949, 260710.662, 179792.857, 102993.039, 263847.857, 209855.32, 409701.388, 312560.992, 989253.662};
-    double q9_exec_time3_saved[] = {119138.578, 41842.193, 70971.661, 207143.648, 298420.073, 223803.843, 88398.364, 152488.774, 487207.765, 349014.554, 486045.704, 290525.441, 213980.835, 447861.125, 403334.148, 733679.654, 627416.194, 1882207.197};
-    double q10_exec_time3_saved[] = {275979.924, 69131.387, 149850.802, 509485.797, 757954.229, 537122.691, 145871.085, 283570.55, 1293367.083, 886159.039, 1330796.074, 570943.255, 351843.433, 887192.176, 678072.576, 1306695.821, 1007951.792, 3278640.336};
-    double q11_exec_time3_saved[] = {116197.875, 26948.188, 53292.176, 218831.023, 328470.413, 220401.138, 57931.305, 115217.056, 539001.221, 368643.622, 535615.678, 247930.689, 128568.488, 369869.059, 272769.575, 515894.317, 425552.188, 1187134.287};
-    */
-    
-    // Ver. 1 (cost = row + row * attribute / 7.2)
-    /*
-    int data1_len_saved = 14;
-    int data2_len_saved = 14;
-    int data3_len_saved = 18;
-
-    double data_num1_saved[] = {708.333,847.222,1402.778,2444.444,7083.333,8472.222,14027.7778,14166.666,16944.444,24444.444,28055.556,48888.889,141666.667,169444.444};
-    double data_num2_saved[] = {169444.444,280555.556,488888.889,1416666.667,1694444.444,2805555.556,4888888.889,7083333.333,8472222.222,14027777.778,15583333.333,18638888.889,24444444.444,30861111.111};
-    double data_num3_saved[] = {30861111.111,35416666.667,42361111.111,53777777.778,70138888.889,70833333.333,84722222.222,106250000.0,122222222.222,127083333.333,140277777.778,155833333.334,186388888.889,210416666.667,244444444.444,308611111.111,366666666.667,537777777.778};
-
-    double q1_exec_time1_saved[] = {5.009,11.191,7.748,16.792,28.235,30.145,35.973,38.956,41.345,45.241,52.418,72.999,209.909,240.505};
-    double q2_exec_time1_saved[] = {9.35,11.292,12.841,13.251,20.488,26.042,30.417,27.193,35.864,33.15,46.946,54.163,139.75,193.902};
-    double q3_exec_time1_saved[] = {7.403,8.965,14.224,15.928,27.692,29.636,35.787,38.672,40.371,45.382,56.302,72.221,220.958,327.824};
-    double q4_exec_time1_saved[] = {17.894,12.516,12.863,13.896,21.687,25.323,32.996,28.148,34.996,36.216,48.222,52.933,144.889,265.951};
-    double q5_exec_time1_saved[] = {12.797,11.42,12.91,15.846,28.189,33.896,39.047,43.234,46.022,46.382,55.375,75.878,277.066,326.803};
-    double q6_exec_time1_saved[] = {10.161,10.688,12.009,13.49,22.58,26.02,33.935,33.045,40.856,34.686,52.943,61.955,174.466,239.625};
-    double q7_exec_time1_saved[] = {12.207,13.605,14.461,16.98,33.153,33.544,36.199,46.006,46.649,47.827,59.511,81.501,284.85,327.834};
-    double q8_exec_time1_saved[] = {5.164,12.622,7.569,13.963,21.629,26.906,32.828,33.316,40.492,36.015,54.775,59.572,187.089,271.938};
-    double q9_exec_time1_saved[] = {81.173,78.342,74.583,76.848,89.299,92.651,101.522,110.814,111.765,115.361,124.612,152.165,439.068,496.864};
-    double q10_exec_time1_saved[] = {76.744,79.285,92.126,96.959,120.581,124.703,133.223,175.217,190.55,159.885,190.336,219.694,1118.38,1119.738};
-    double q11_exec_time1_saved[] = {82.316,91.629,85.542,86.28,107.702,97.484,104.085,116.438,121.662,110.878,122.37,129.364,589.264,494.269};
-
-    double q1_exec_time2_saved[] = {240.505,365.524,548.974,1872.263,2167.093,3386.87,5407.051,9277.869,10525.969,16669.776,23334.794,25803.333,26713.085,43052.146};
-    double q2_exec_time2_saved[] = {193.902,305.527,370.061,1205.661,1740.564,2975.972,3645.606,5808.105,8792.383,14587.2,14509.886,20321.73,17776.235,33194.21};
-    double q3_exec_time2_saved[] = {327.824,405.367,584.49,2012.655,2377.038,3581.959,5800.496,9893.691,11531.832,18191.286,24134.952,29738.307,28612.6,45069.838};
-    double q4_exec_time2_saved[] = {265.951,330.051,400.493,1269.822,1872.095,3218.198,3830.26,6375.026,9281.487,15758.756,15849.221,21907.723,19373.58,38924.262};
-    double q5_exec_time2_saved[] = {326.803,421.25,613.809,2502.56,2753.195,3927.284,5883.764,12369.244,13789.244,20256.496,32271.319,35754.92,30121.679,47366.668};
-    double q6_exec_time2_saved[] = {239.625,356.558,418.147,1590.002,2217.104,3533.653,3964.549,7760.655,10956.839,16989.203,19916.996,28217.732,20089.965,42560.047};
-    double q7_exec_time2_saved[] = {327.834,456.841,702.726,2644.18,3069.341,4359.867,6424.821,13560.691,14702.675,21190.27,33953.631,35622.5,32490.007,55270.125};
-    double q8_exec_time2_saved[] = {271.938,390.979,451.671,1622.792,2441.945,3743.941,4175.311,7935.875,11521.669,19129.652,20564.634,30655.974,21422.176,45133.391};
-    double q9_exec_time2_saved[] = {496.864,611.651,901.701,4004.508,4245.531,5701.471,8435.313,19549.907,21006.708,28104.019,50805.343,52559.642,41842.193,70971.661};
-    double q10_exec_time2_saved[] = {1119.738,1217.085,1486.951,10760.068,10558.173,11383.756,14007.624,52222.365,53091.169,58041.256,131299.554,139747.236,69131.387,149850.802};
-    double q11_exec_time2_saved[] = {494.269,539.124,612.425,4359.527,4342.357,4744.796,5352.497,20963.225,21381.717,25301.286,48744.342,55878.196,26948.188,53292.176};
-
-    double q1_exec_time3_saved[] = {43052.146,48559.641,56551.836,57944.83,89096.379,93323.808,105511.015,139332.114,139562.096,156243.598,166006.466,229580.474,240975.25,243597.821,262546.25,404717.703,399187.996,1205969.281};
-    double q2_exec_time3_saved[] = {33194.21,30649.077,46062.151,39115.23,76771.871,58409.181,84474.642,87900.828,92798.449,128149.336,150702.284,144551.863,195283.74,210084.337,180343.384,346516.425,265797.913,800323.03};
-    double q3_exec_time3_saved[] = {45069.838,50551.571,61687.493,62449.838,90084.871,98159.046,111329.742,148941.095,149521.546,169629.422,180306.385,230095.489,257091.821,266163.218,288725.023,433311.225,430005.474,1302605.243};
-    double q4_exec_time3_saved[] = {38924.262,31569.845,48325.145,41669.582,76962.051,60774.615,90139.834,91243.221,100548.227,134853.333,151588.898,149945.698,205844.827,224367.422,189670.398,372984.949,283135.547,910734.295};
-    double q5_exec_time3_saved[] = {47366.668,65646.335,75013.658,62513.73,95989.188,125173.482,136885.635,191152.158,144649.888,205193.227,195162.505,315766.676,314395.783,294664.718,294474.647,470954.754,441835.294,1367070.923};
-    double q6_exec_time3_saved[] = {42560.047,40260.792,64115.814,41905.492,82042.596,76699.789,108547.11,115235.281,96630.489,160100.087,166929.56,187861.985,252727.297,247056.389,195290.883,404462.286,294431.575,909565.503};
-    double q7_exec_time3_saved[] = {55270.125,69992.293,79871.8,69447.435,102812.695,135122.104,148150.643,195579.157,157916.653,248551.748,216450.355,329552.087,334101.326,310184.728,312772.712,513220.959,472904.653,1389510.781};
-    double q8_exec_time3_saved[] = {45133.391,43267.373,61718.12,46049.951,89405.264,80657.687,118796.035,119596.658,102993.039,192419.949,179792.857,197538.799,260710.662,263847.857,209855.32,409701.388,312560.992,989253.662};
-    double q9_exec_time3_saved[] = {70971.661,106375.62,119138.578,88398.364,152488.774,207143.648,223803.843,298420.073,213980.835,349014.554,290525.441,487207.765,486045.704,447861.125,403334.148,733679.654,627416.194,1882207.197};
-    double q10_exec_time3_saved[] = {149850.802,282640.036,275979.924,145871.085,283570.55,509485.797,537122.691,757954.229,351843.433,886159.039,570943.255,1293367.083,1330796.074,887192.176,678072.576,1306695.821,1007951.792,3278640.336};
-    double q11_exec_time3_saved[] = {53292.176,113040.877,116197.875,57931.305,115217.056,218831.023,220401.138,328470.413,128568.488,368643.622,247930.689,539001.221,535615.678,369869.059,272769.575,515894.317,425552.188,1187134.287};
-    */
-
-    // Ver. 2 (cost = page_num + 1 + row * 0.011 + row * attribute * 0.001)
-    
     int data1_len_saved = 14;
     int data2_len_saved = 14;
     int data3_len_saved = 18;
@@ -3482,26 +3394,10 @@ void add_new_data(double** num1, double** num2, double** num3,
                      &data_num2, &data_num3, &q1_exec_time2, &q1_exec_time3, &exec_coef2, &exec_coef3, false)){
         printf("Error occured in adj 2\n");
     }
-    /*
-    printf("-----------------------------------\n");
-    for (int x = 0 ; x < EXEC_ORDER + 1 ; x++){
-        printf("%e ", exec_coef1[x]);
-    }
-    printf("\n");
-    for (int x = 0 ; x < EXEC_ORDER + 1 ; x++){
-        printf("%e ", exec_coef2[x]);
-    }
-    printf("\n");
-    for (int x = 0 ; x < EXEC_ORDER + 1 ; x++){
-        printf("%e ", exec_coef3[x]);
-    }
-    printf("\n");
-    printf("-----------------------------------\n");
-    */
+
     *coef1 = exec_coef1;
     *coef2 = exec_coef2;
     *coef3 = exec_coef3;
-
 }
 
 // debugging function
@@ -3511,16 +3407,6 @@ void print_errors(double* data_num, double* exec_time, int data_len, double* exe
         printf("Error occured in polyfit\n");
     }
     double *assume_result = polyval_multi(data_num, exec_time, data_len, exec_coef);
-    /*
-    printf("Approx data: ");
-    for (int j = 0 ; j < data_len ; j++){
-        if (j == (data_len - 1)){
-            printf("%.3f\n", assume_result[j]);
-        } else{
-            printf("%.3f, ", assume_result[j]);
-        }
-    }*/
-
     double partial_error = 0;
     double total_error = 0;
     double total_error_rate = 0;
@@ -3532,12 +3418,7 @@ void print_errors(double* data_num, double* exec_time, int data_len, double* exe
         partial_error = ABS(exec_time[j] - assume_result[j]);
         if ((!first_flag) & (j == 0)){
             continue;
-        }/*
-        if (j == (data_len - 1)){
-            printf("%.3f\n", partial_error);
-        } else{
-            printf("%.3f, ", partial_error);
-        }*/
+        }
         total_error += partial_error;
     }
     //printf("partial error rate: ");
@@ -3545,15 +3426,9 @@ void print_errors(double* data_num, double* exec_time, int data_len, double* exe
         partial_error = ABS(exec_time[j] - assume_result[j]);
         if ((!first_flag) & (j == 0)){
             continue;
-        }/*
-        if (j == (data_len - 1)){
-            printf("%.3f\n", ((partial_error / exec_time[j]) * 100));
-        } else{
-            printf("%.3f, ", ((partial_error / exec_time[j]) * 100));
-        }*/
+        }
         total_error_rate += ((partial_error / exec_time[j]) * 100);
     }
-
 
     if (first_flag){
         //printf("total avg partial error: %.3f\n", total_error/data_len);
@@ -3567,7 +3442,6 @@ void print_errors(double* data_num, double* exec_time, int data_len, double* exe
     
     return;
 }
-
 
 /* ----------------------------------------------------------------
  *		routines to obtain user input
@@ -7618,7 +7492,7 @@ PostgresMain(int argc, char *argv[],
 		 * (3) read a command (loop blocks here)
 		 */
 		firstchar = ReadCommand(&input_message);
-		printf("------------------------------------------new loop------------------------------------------\n");
+		//printf("------------------------------------------new loop------------------------------------------\n");
 
 		if ((SIM_ADAPTIVE_RANGE) & (USE_ADAPTIVE_RANGE)){
 			if (!inited){
@@ -7691,7 +7565,7 @@ PostgresMain(int argc, char *argv[],
 				
     			get_init_values(&data_num1, &data_num2, &data_num3, &exec_time1, &exec_time2, &exec_time3, &data1_len, &data2_len, &data3_len);
 
-				printf("Before Adjust\n");
+				//printf("Before Adjust\n");
 				for (int i = 0 ; i < QUERYNUM ; i++){
 					if (polyfit(data1_len[i], data_num1[i], exec_time1[i], EXEC_ORDER + 1, exec_coef1[i])){
 						printf("Error occured in polyfit\n");
@@ -7703,12 +7577,12 @@ PostgresMain(int argc, char *argv[],
 						printf("Error occured in polyfit\n");
 					}
 
-					printf("-----------------------------------\n");
-					printf("Query Q%d (len: %d / %d / %d)\n", i + 1, data1_len[i], data2_len[i], data3_len[i]);
-					print_errors(data_num1[i], exec_time1[i], data1_len[i], exec_coef1[i], true);
-					print_errors(data_num2[i], exec_time2[i], data2_len[i], exec_coef2[i], false);
-					print_errors(data_num3[i], exec_time3[i], data3_len[i], exec_coef3[i], false);
-					printf("-----------------------------------\n");
+					//printf("-----------------------------------\n");
+					//printf("Query Q%d (len: %d / %d / %d)\n", i + 1, data1_len[i], data2_len[i], data3_len[i]);
+					//print_errors(data_num1[i], exec_time1[i], data1_len[i], exec_coef1[i], true);
+					//print_errors(data_num2[i], exec_time2[i], data2_len[i], exec_coef2[i], false);
+					//print_errors(data_num3[i], exec_time3[i], data3_len[i], exec_coef3[i], false);
+					//printf("-----------------------------------\n");
 				}
 				
 				for (int i = 0 ; i < QUERYNUM ; i++){
@@ -7727,10 +7601,10 @@ PostgresMain(int argc, char *argv[],
 									&data_num2[i], &data_num3[i], &exec_time2[i], &exec_time3[i], &exec_coef2[i], &exec_coef3[i], false)){
 						printf("Error occured in adj 2\n");
 					}
-					printf("\n");
+					//printf("\n");
 				}
 
-				printf("After Adjust\n");
+				//printf("After Adjust\n");
 				for (int i = 0 ; i < QUERYNUM ; i++){
 					if (polyfit(data1_len[i], data_num1[i], exec_time1[i], EXEC_ORDER + 1, exec_coef1[i])){
 						printf("Error occured in polyfit\n");
@@ -7742,12 +7616,12 @@ PostgresMain(int argc, char *argv[],
 						printf("Error occured in polyfit\n");
 					}
 
-					printf("-----------------------------------\n");
-					printf("Query Q%d (len: %d / %d / %d)\n", i + 1, data1_len[i], data2_len[i], data3_len[i]);
-					print_errors(data_num1[i], exec_time1[i], data1_len[i], exec_coef1[i], true);
-					print_errors(data_num2[i], exec_time2[i], data2_len[i], exec_coef2[i], false);
-					print_errors(data_num3[i], exec_time3[i], data3_len[i], exec_coef3[i], false);
-					printf("-----------------------------------\n");
+					//printf("-----------------------------------\n");
+					//printf("Query Q%d (len: %d / %d / %d)\n", i + 1, data1_len[i], data2_len[i], data3_len[i]);
+					//print_errors(data_num1[i], exec_time1[i], data1_len[i], exec_coef1[i], true);
+					//print_errors(data_num2[i], exec_time2[i], data2_len[i], exec_coef2[i], false);
+					//print_errors(data_num3[i], exec_time3[i], data3_len[i], exec_coef3[i], false);
+					//printf("-----------------------------------\n");
 				}
 
 				inited = true;
